@@ -2,106 +2,173 @@ import os
 import sys
 import time
 import tweepy
+import logging
+import argparse
 from dotenv import load_dotenv
 
-def main():
-    """
-    Main function to run the X unblocking tool.
-    """
-    print("--- X Unblocker Tool ---")
+def countdown(seconds, message="Waiting..."):
+    """Displays a countdown timer for a given duration using logging."""
+    for i in range(seconds, 0, -1):
+        mins, secs = divmod(i, 60)
+        timer = f"{mins:02d}:{secs:02d}"
+        logging.info(f"{message} {timer}", extra={'single_line': True})
+        time.sleep(1)
+    # Clear the line after countdown finishes
+    logging.info("", extra={'single_line': True}) # Clear the line
 
-    # Load environment variables from .env file
+# --- Constants ---
+RATE_LIMIT_THRESHOLD = 50
+RATE_LIMIT_PAUSE_SECONDS = 901
+
+# --- Custom Logging Handler for Single-Line Updates ---
+class SingleLineUpdateHandler(logging.StreamHandler):
+    """A logging handler that uses carriage returns to update a single line."""
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._last_single_line_length = 0
+
+    def emit(self, record):
+        if record.levelno == logging.INFO and hasattr(record, 'single_line'):
+            message = self.format(record)
+            # Clear the previous line if necessary
+            if self._last_single_line_length > len(message):
+                print(" " * self._last_single_line_length, end="\r", flush=True)
+            print(f"\r{message}", end="", flush=True)
+            self._last_single_line_length = len(message)
+        else:
+            # If a non-single-line record comes, clear any active single-line message
+            if self._last_single_line_length > 0:
+                print(" " * self._last_single_line_length, end="\r", flush=True)
+                self._last_single_line_length = 0
+            super().emit(record)
+
+def setup_arguments_and_logging():
+    """Sets up argument parser and configures logging."""
+    parser = argparse.ArgumentParser(description="Unblock all blocked accounts on your X profile.")
+    parser.add_argument("--debug", action="store_true", help="Enable debug logging for detailed output.")
+    args = parser.parse_args()
+
+    # Configure logging
+    log_level = logging.DEBUG if args.debug else logging.INFO
+    
+    # Get the root logger
+    logger = logging.getLogger()
+    logger.setLevel(log_level)
+    
+    # Remove any existing handlers
+    for handler in logger.handlers[:]:
+        logger.removeHandler(handler)
+        
+    # Create our custom handler and add it
+    handler = SingleLineUpdateHandler()
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    
+    return args
+
+def create_tweepy_client():
+    """Loads credentials and creates an authenticated Tweepy client."""
+    logging.debug("Loading environment variables from .env file...")
     load_dotenv()
+    logging.debug("Environment variables loaded.")
 
-    # Get credentials from environment variables
+    logging.debug("Fetching API credentials from environment variables.")
     api_key = os.getenv("X_API_KEY")
     api_key_secret = os.getenv("X_API_KEY_SECRET")
     access_token = os.getenv("X_ACCESS_TOKEN")
     access_token_secret = os.getenv("X_ACCESS_TOKEN_SECRET")
 
-    # Validate that all credentials are present
     if not all([api_key, api_key_secret, access_token, access_token_secret]):
-        print("\nError: Missing API credentials.")
-        print("Please make sure you have a .env file with all the required keys:")
-        print("X_API_KEY, X_API_KEY_SECRET, X_ACCESS_TOKEN, X_ACCESS_TOKEN_SECRET")
-        print("\nYou can use the .env.example file as a template.")
+        logging.error("Missing API credentials. Check your .env file.")
         sys.exit(1)
+    
+    logging.info("Successfully loaded API credentials.")
 
-    print("\nSuccessfully loaded API credentials.")
-
-    # Authenticate with X API
     try:
-        print("Authenticating with the X API...")
+        logging.info("Authenticating with the X API...")
         client = tweepy.Client(
             consumer_key=api_key,
             consumer_secret=api_key_secret,
             access_token=access_token,
             access_token_secret=access_token_secret,
         )
-        # Get authenticated user's ID
         auth_user = client.get_me(user_fields=["id"])
-        auth_user_id = auth_user.data.id
-        print("Authentication successful.")
+        logging.debug(f"Authenticated as user ID: {auth_user.data.id}")
+        logging.info("Authentication successful.")
+        return client
     except Exception as e:
-        print(f"\nError during API authentication: {e}")
-        print("Please check your API credentials and permissions.")
+        logging.error(f"Error during API authentication: {e}", exc_info=True)
         sys.exit(1)
 
-    # Fetch blocked users
-    print("\nFetching blocked accounts... (This might take a moment)")
+def fetch_blocked_users(client):
+    """Fetches the complete list of blocked user IDs from the API."""
+    logging.info("Fetching blocked accounts... (This might take a moment)")
     blocked_users = []
-    try:
-        # Tweepy's Paginator handles the pagination for us
-        for response in tweepy.Paginator(client.get_blocking, id=auth_user_id, max_results=1000):
-            if response.data:
-                blocked_users.extend(response.data)
-
-        if not blocked_users:
-            print("You have no blocked accounts. Nothing to do!")
-            sys.exit(0)
-
-        print(f"Found {len(blocked_users)} blocked accounts.")
-
-    except Exception as e:
-        print(f"\nError fetching blocked accounts: {e}")
-        sys.exit(1)
-
-    # --- Unblocking Process ---
-    print("\nStarting the unblocking process...")
-    print("IMPORTANT: The script will pause for 15 minutes after every 50 unblocks to comply with API rate limits.")
-    total_blocked = len(blocked_users)
-    estimated_minutes = (total_blocked // 50) * 15
-    print(f"Based on {total_blocked} accounts, the estimated time to complete is around {estimated_minutes} minutes.")
-
-    unblocked_count = 0
-    unblocked_usernames = []
-    requests_count = 0
-
-    for user in blocked_users:
+    while True:
         try:
-            # Unblock the user
-            client.unblock(target_user_id=user.id)
+            logging.debug("Clearing local list of blocked users before fetching.")
+            blocked_users.clear()
+            logging.debug("Starting to paginate through blocked users from the API.")
+            for response in tweepy.Paginator(client.get_blocked, max_results=100):
+                if response.data:
+                    logging.debug(f"Fetched a batch of {len(response.data)} blocked users.")
+                    blocked_users.extend(response.data)
+                    logging.info(f"Found {len(blocked_users)} blocked accounts...", extra={'single_line': True})
+            logging.info(f"Finished fetching. Found a total of {len(blocked_users)} blocked accounts.")
+            return blocked_users
 
-            # Log success
-            unblocked_count += 1
-            unblocked_usernames.append(user.username)
-            print(f"({unblocked_count}/{total_blocked}) Successfully unblocked @{user.username}")
-
-            # Handle rate limiting
-            requests_count += 1
-            if requests_count == 50:
-                print("\n--- Rate limit reached. Pausing for 15 minutes. ---")
-                time.sleep(901) # Pause for 15 minutes and 1 second to be safe
-                print("--- Resuming... ---\n")
-                requests_count = 0 # Reset counter
+        except tweepy.errors.TooManyRequests:
+            logging.warning(f"Rate limit exceeded. Pausing for {RATE_LIMIT_PAUSE_SECONDS // 60} minutes...")
+            countdown(RATE_LIMIT_PAUSE_SECONDS, "Pausing due to rate limit...")
+            logging.info("Resuming fetch...")
+            continue
 
         except Exception as e:
-            print(f"Could not unblock @{user.username}. Reason: {e}")
+            logging.error(f"An unexpected error occurred while fetching: {e}", exc_info=True)
+            sys.exit(1)
 
-    print("\n--- Unblocking Process Complete! ---")
-    print(f"Total accounts unblocked: {unblocked_count}")
-    if unblocked_usernames:
-        print("Unblocked users:", ", ".join(unblocked_usernames))
+def unblock_users(client, blocked_users):
+    """Iterates through the list of users and unblocks them."""
+    total_blocked = len(blocked_users)
+    if total_blocked == 0:
+        logging.info("You have no blocked accounts. Nothing to do!")
+        return
+
+    logging.info(f"Starting the unblocking process for {total_blocked} accounts...")
+    estimated_minutes = (total_blocked // RATE_LIMIT_THRESHOLD) * (RATE_LIMIT_PAUSE_SECONDS // 60)
+    logging.info(f"Estimated time to complete is around {estimated_minutes} minutes.")
+
+    unblocked_count = 0
+    for i, user in enumerate(blocked_users, 1):
+        try:
+            logging.debug(f"Attempting to unblock user @{user.username} (ID: {user.id})...")
+            client.unblock(target_user_id=user.id)
+            unblocked_count += 1
+            logging.debug(f"Successfully unblocked @{user.username}.")
+            logging.info(f"({unblocked_count}/{total_blocked}) Unblocked @{user.username}", extra={'single_line': True})
+
+            if i % RATE_LIMIT_THRESHOLD == 0 and i < total_blocked:
+                logging.warning(f"Rate limit threshold reached. Pausing for {RATE_LIMIT_PAUSE_SECONDS // 60} minutes.")
+                countdown(RATE_LIMIT_PAUSE_SECONDS, "Pausing to respect rate limits...")
+                logging.info("Resuming unblocking...")
+
+        except Exception as e:
+            logging.error(f"Could not unblock @{user.username}. Reason: {e}", exc_info=True)
+    logging.info(f"--- Unblocking Process Complete! ---")
+    logging.info(f"Total accounts unblocked: {unblocked_count}")
+
+def main():
+    """
+    Main function to run the X unblocking tool.
+    """
+    setup_arguments_and_logging()
+    logging.info("--- X Unblocker Tool ---")
+    
+    client = create_tweepy_client()
+    blocked_users = fetch_blocked_users(client)
+    unblock_users(client, blocked_users)
+
 
 
 if __name__ == "__main__":
