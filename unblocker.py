@@ -92,12 +92,13 @@ def create_tweepy_client():
             consumer_secret=api_key_secret,
             access_token=access_token,
             access_token_secret=access_token_secret,
+            wait_on_rate_limit=True,
         )
         auth_user = client.get_me(user_fields=["id"])
         logging.debug(f"Authenticated as user ID: {auth_user.data.id}")
         logging.info("Authentication successful.")
         return client
-    except Exception as e:
+    except tweepy.errors.TweepyException as e:
         logging.error(f"Error during API authentication: {e}", exc_info=True)
         sys.exit(1)
 
@@ -105,28 +106,19 @@ def fetch_blocked_users(client):
     """Fetches the complete list of blocked user IDs from the API."""
     logging.info("Fetching blocked accounts... (This might take a moment)")
     blocked_users = []
-    while True:
-        try:
-            logging.debug("Clearing local list of blocked users before fetching.")
-            blocked_users.clear()
-            logging.debug("Starting to paginate through blocked users from the API.")
-            for response in tweepy.Paginator(client.get_blocked, max_results=100):
-                if response.data:
-                    logging.debug(f"Fetched a batch of {len(response.data)} blocked users.")
-                    blocked_users.extend(response.data)
-                    logging.info(f"Found {len(blocked_users)} blocked accounts...", extra={'single_line': True})
-            logging.info(f"Finished fetching. Found a total of {len(blocked_users)} blocked accounts.")
-            return blocked_users
+    try:
+        logging.debug("Starting to paginate through blocked users from the API.")
+        for response in tweepy.Paginator(client.get_blocked, max_results=100):
+            if response.data:
+                logging.debug(f"Fetched a batch of {len(response.data)} blocked users.")
+                blocked_users.extend(response.data)
+                logging.info(f"Found {len(blocked_users)} blocked accounts...", extra={'single_line': True})
+        logging.info(f"Finished fetching. Found a total of {len(blocked_users)} blocked accounts.")
+        return blocked_users
 
-        except tweepy.errors.TooManyRequests:
-            logging.warning(f"Rate limit exceeded. Pausing for {RATE_LIMIT_PAUSE_SECONDS // 60} minutes...")
-            countdown(RATE_LIMIT_PAUSE_SECONDS, "Pausing due to rate limit...")
-            logging.info("Resuming fetch...")
-            continue
-
-        except Exception as e:
-            logging.error(f"An unexpected error occurred while fetching: {e}", exc_info=True)
-            sys.exit(1)
+    except tweepy.errors.TweepyException as e:
+        logging.error(f"An unexpected error occurred while fetching: {e}", exc_info=True)
+        sys.exit(1)
 
 def unblock_users(client, blocked_users):
     """Iterates through the list of users and unblocks them."""
@@ -140,7 +132,7 @@ def unblock_users(client, blocked_users):
     logging.info(f"Estimated time to complete is around {estimated_minutes} minutes.")
 
     unblocked_count = 0
-    for i, user in enumerate(blocked_users, 1):
+    for user in blocked_users:
         try:
             logging.debug(f"Attempting to unblock user @{user.username} (ID: {user.id})...")
             client.unblock(target_user_id=user.id)
@@ -148,12 +140,7 @@ def unblock_users(client, blocked_users):
             logging.debug(f"Successfully unblocked @{user.username}.")
             logging.info(f"({unblocked_count}/{total_blocked}) Unblocked @{user.username}", extra={'single_line': True})
 
-            if i % RATE_LIMIT_THRESHOLD == 0 and i < total_blocked:
-                logging.warning(f"Rate limit threshold reached. Pausing for {RATE_LIMIT_PAUSE_SECONDS // 60} minutes.")
-                countdown(RATE_LIMIT_PAUSE_SECONDS, "Pausing to respect rate limits...")
-                logging.info("Resuming unblocking...")
-
-        except Exception as e:
+        except tweepy.errors.TweepyException as e:
             logging.error(f"Could not unblock @{user.username}. Reason: {e}", exc_info=True)
     logging.info(f"--- Unblocking Process Complete! ---")
     logging.info(f"Total accounts unblocked: {unblocked_count}")
