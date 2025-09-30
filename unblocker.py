@@ -19,6 +19,27 @@ def countdown(seconds, message="Waiting..."):
 # --- Constants ---
 RATE_LIMIT_THRESHOLD = 50
 RATE_LIMIT_PAUSE_SECONDS = 901
+BLOCKED_IDS_FILE = 'blocked_ids.txt'
+UNBLOCKED_IDS_FILE = 'unblocked_ids.txt'
+
+# --- State Persistence Functions ---
+def load_ids_from_file(filename):
+    """Loads a set of user IDs from a text file."""
+    if not os.path.exists(filename):
+        return set()
+    with open(filename, 'r') as f:
+        return {int(line.strip()) for line in f if line.strip()}
+
+def save_ids_to_file(filename, ids):
+    """Saves a list or set of user IDs to a text file."""
+    with open(filename, 'w') as f:
+        for user_id in ids:
+            f.write(f"{user_id}\n")
+
+def append_id_to_file(filename, user_id):
+    """Appends a single user ID to a text file."""
+    with open(filename, 'a') as f:
+        f.write(f"{user_id}\n")
 
 # --- Custom Logging Handler for Single-Line Updates ---
 class SingleLineUpdateHandler(logging.StreamHandler):
@@ -28,19 +49,19 @@ class SingleLineUpdateHandler(logging.StreamHandler):
         self._last_single_line_length = 0
 
     def emit(self, record):
+        message = self.format(record)
         if record.levelno == logging.INFO and hasattr(record, 'single_line'):
-            message = self.format(record)
             # Clear the previous line if necessary
             if self._last_single_line_length > len(message):
-                print(" " * self._last_single_line_length, end="\r", flush=True)
-            print(f"\r{message}", end="", flush=True)
+                print(" " * self._last_single_line_length, end="\r", file=sys.stdout, flush=True)
+            print(f"\r{message}", end="", file=sys.stdout, flush=True)
             self._last_single_line_length = len(message)
         else:
             # If a non-single-line record comes, clear any active single-line message
             if self._last_single_line_length > 0:
-                print(" " * self._last_single_line_length, end="\r", flush=True)
+                print(" " * self._last_single_line_length, end="\r", file=sys.stdout, flush=True)
                 self._last_single_line_length = 0
-            super().emit(record)
+            print(message, file=sys.stdout, flush=True)
 
 def setup_arguments_and_logging():
     """Sets up argument parser and configures logging."""
@@ -67,8 +88,8 @@ def setup_arguments_and_logging():
     
     return args
 
-def create_tweepy_client():
-    """Loads credentials and creates an authenticated Tweepy client."""
+def create_tweepy_clients():
+    """Loads credentials and creates authenticated Tweepy clients for v1.1 and v2."""
     logging.debug("Loading environment variables from .env file...")
     load_dotenv()
     logging.debug("Environment variables loaded.")
@@ -87,63 +108,108 @@ def create_tweepy_client():
 
     try:
         logging.info("Authenticating with the X API...")
-        client = tweepy.Client(
+        # v2 client for unblocking
+        client_v2 = tweepy.Client(
             consumer_key=api_key,
             consumer_secret=api_key_secret,
             access_token=access_token,
             access_token_secret=access_token_secret,
             wait_on_rate_limit=True,
         )
-        auth_user = client.get_me(user_fields=["id"])
+        auth_user = client_v2.get_me(user_fields=["id"])
         logging.debug(f"Authenticated as user ID: {auth_user.data.id}")
-        logging.info("Authentication successful.")
-        return client
-    except tweepy.errors.TweepyException as e:
+
+        # v1.1 client for fetching blocked IDs
+        auth = tweepy.OAuth1UserHandler(api_key, api_key_secret, access_token, access_token_secret)
+        api_v1 = tweepy.API(auth)
+        
+        logging.info("Authentication successful for both API v1.1 and v2.")
+        return api_v1, client_v2
+    except Exception as e:
         logging.error(f"Error during API authentication: {e}", exc_info=True)
         sys.exit(1)
 
-def fetch_blocked_users(client):
-    """Fetches the complete list of blocked user IDs from the API."""
-    logging.info("Fetching blocked accounts... (This might take a moment)")
-    blocked_users = []
-    try:
-        logging.debug("Starting to paginate through blocked users from the API.")
-        for response in tweepy.Paginator(client.get_blocked, max_results=100):
-            if response.data:
-                logging.debug(f"Fetched a batch of {len(response.data)} blocked users.")
-                blocked_users.extend(response.data)
-                logging.info(f"Found {len(blocked_users)} blocked accounts...", extra={'single_line': True})
-        logging.info(f"Finished fetching. Found a total of {len(blocked_users)} blocked accounts.")
-        return blocked_users
+def fetch_blocked_user_ids(api_v1):
+    """Fetches the complete list of blocked user IDs from the API v1.1."""
+    logging.info("Fetching blocked account IDs... (This will be fast)")
+    blocked_user_ids = []
+    cursor = -1
+    while True:
+        try:
+            logging.debug(f"Fetching blocked IDs with cursor: {cursor}")
+            ids, cursor = api_v1.get_blocked_ids(cursor=cursor)
+            blocked_user_ids.extend(ids)
+            logging.info(f"Found {len(blocked_user_ids)} blocked account IDs...", extra={'single_line': True})
+            if cursor == 0:
+                break
+        
+        except tweepy.errors.TooManyRequests:
+            logging.warning(f"Rate limit exceeded. Pausing for {RATE_LIMIT_PAUSE_SECONDS // 60} minutes...")
+            countdown(RATE_LIMIT_PAUSE_SECONDS, "Pausing due to rate limit...")
+            logging.info("Resuming fetch...")
+            continue
 
-    except tweepy.errors.TweepyException as e:
-        logging.error(f"An unexpected error occurred while fetching: {e}", exc_info=True)
-        sys.exit(1)
+        except Exception as e:
+            logging.error(f"An unexpected error occurred while fetching: {e}", exc_info=True)
+            sys.exit(1)
 
-def unblock_users(client, blocked_users):
-    """Iterates through the list of users and unblocks them."""
-    total_blocked = len(blocked_users)
-    if total_blocked == 0:
-        logging.info("You have no blocked accounts. Nothing to do!")
+    logging.info(f"Finished fetching. Found a total of {len(blocked_user_ids)} blocked account IDs.")
+    return blocked_user_ids
+
+def unblock_user_ids(client_v2, blocked_user_ids):
+    """Iterates through the list of user IDs and unblocks them, saving progress."""
+    total_to_unblock = len(blocked_user_ids)
+    if total_to_unblock == 0:
+        logging.info("All previously blocked accounts have been unblocked. Nothing to do!")
         return
 
-    logging.info(f"Starting the unblocking process for {total_blocked} accounts...")
-    estimated_minutes = (total_blocked // RATE_LIMIT_THRESHOLD) * (RATE_LIMIT_PAUSE_SECONDS // 60)
-    logging.info(f"Estimated time to complete is around {estimated_minutes} minutes.")
-
+    logging.info(f"Starting the unblocking process for {total_to_unblock} accounts...")
+    
     unblocked_count = 0
-    for user in blocked_users:
+    failed_ids = []
+    
+    ids_to_process = list(blocked_user_ids)
+    index = 0
+    while index < len(ids_to_process):
+        user_id = ids_to_process[index]
         try:
-            logging.debug(f"Attempting to unblock user @{user.username} (ID: {user.id})...")
-            client.unblock(target_user_id=user.id)
+            logging.debug(f"Attempting to unblock user ID: {user_id}...")
+            client_v2.unblock(target_user_id=user_id)
             unblocked_count += 1
-            logging.debug(f"Successfully unblocked @{user.username}.")
-            logging.info(f"({unblocked_count}/{total_blocked}) Unblocked @{user.username}", extra={'single_line': True})
+            
+            # Save progress immediately
+            append_id_to_file(UNBLOCKED_IDS_FILE, user_id)
+            logging.debug(f"Successfully unblocked and recorded user ID: {user_id}.")
+            
+            # Display progress relative to the current session's workload
+            logging.info(f"({unblocked_count}/{total_to_unblock}) Unblocked user ID: {user_id}", extra={'single_line': True})
 
-        except tweepy.errors.TweepyException as e:
-            logging.error(f"Could not unblock @{user.username}. Reason: {e}", exc_info=True)
-    logging.info(f"--- Unblocking Process Complete! ---")
-    logging.info(f"Total accounts unblocked: {unblocked_count}")
+            # Check for proactive pause (don't rely on hitting an error)
+            if unblocked_count % RATE_LIMIT_THRESHOLD == 0 and index < len(ids_to_process) - 1:
+                logging.warning(f"Proactive rate limit pause reached. Pausing for {RATE_LIMIT_PAUSE_SECONDS // 60} minutes.")
+                countdown(RATE_LIMIT_PAUSE_SECONDS, "Pausing to respect rate limits...")
+                logging.info("Resuming unblocking...")
+            
+            index += 1 # Move to the next user
+
+        except tweepy.errors.TooManyRequests as e:
+            reset_time = int(e.response.headers['x-rate-limit-reset'])
+            sleep_duration = max(0, reset_time - int(time.time()) + 5)
+            logging.warning(f"Rate limit exceeded. Waiting for {sleep_duration // 60}m {sleep_duration % 60}s...")
+            countdown(sleep_duration, "Pausing due to rate limit...")
+            logging.info("Resuming unblocking...")
+            # Do not increment index, to retry the same user
+
+        except Exception as e:
+            logging.error(f"Could not unblock user ID {user_id}. Reason: {e}", exc_info=True)
+            failed_ids.append(user_id)
+            index += 1 # Move to the next user after a failure
+
+    logging.info("--- Unblocking Process Complete! ---")
+    logging.info(f"Total accounts unblocked in this session: {unblocked_count}")
+    if failed_ids:
+        logging.warning(f"Failed to unblock {len(failed_ids)} accounts. Check logs for details.")
+        logging.warning(f"Failed IDs: {failed_ids}")
 
 def main():
     """
@@ -151,10 +217,36 @@ def main():
     """
     setup_arguments_and_logging()
     logging.info("--- X Unblocker Tool ---")
+
+    # --- State Loading and Resumption Logic ---
+    all_blocked_ids = load_ids_from_file(BLOCKED_IDS_FILE)
     
-    client = create_tweepy_client()
-    blocked_users = fetch_blocked_users(client)
-    unblock_users(client, blocked_users)
+    api_v1, client_v2 = None, None
+
+    if not all_blocked_ids:
+        logging.info("No local cache of blocked IDs found. Fetching from the API...")
+        api_v1, client_v2 = create_tweepy_clients()
+        all_blocked_ids = fetch_blocked_user_ids(api_v1)
+        save_ids_to_file(BLOCKED_IDS_FILE, all_blocked_ids)
+        logging.info(f"Saved {len(all_blocked_ids)} blocked IDs to {BLOCKED_IDS_FILE}.")
+    else:
+        logging.info(f"Loaded {len(all_blocked_ids)} blocked IDs from {BLOCKED_IDS_FILE}.")
+
+    completed_ids = load_ids_from_file(UNBLOCKED_IDS_FILE)
+    logging.info(f"Loaded {len(completed_ids)} already unblocked IDs from {UNBLOCKED_IDS_FILE}.")
+
+    ids_to_unblock = all_blocked_ids - completed_ids
+    
+    if not ids_to_unblock:
+        logging.info("All accounts from the list have been unblocked. Nothing to do!")
+        sys.exit(0)
+
+    # --- Unblocking Process ---
+    # Create clients only if we need them
+    if not client_v2:
+        _, client_v2 = create_tweepy_clients()
+        
+    unblock_user_ids(client_v2, ids_to_unblock)
 
 
 
