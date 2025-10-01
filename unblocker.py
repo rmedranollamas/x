@@ -27,8 +27,16 @@ def load_ids_from_file(filename):
     """Loads a set of user IDs from a text file."""
     if not os.path.exists(filename):
         return set()
+    ids = set()
     with open(filename, 'r') as f:
-        return {int(line.strip()) for line in f if line.strip()}
+        for i, line in enumerate(f, 1):
+            stripped_line = line.strip()
+            if stripped_line:
+                try:
+                    ids.add(int(stripped_line))
+                except ValueError:
+                    logging.warning(f'Skipping invalid non-integer value in {filename} on line {i}: "{stripped_line}"')
+    return ids
 
 def save_ids_to_file(filename, ids):
     """Saves a list or set of user IDs to a text file."""
