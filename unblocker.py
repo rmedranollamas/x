@@ -208,9 +208,14 @@ def unblock_user_ids(client_v2, blocked_user_ids):
             index += 1 # Move to the next user
 
         except tweepy.errors.TooManyRequests as e:
-            reset_time = int(e.response.headers['x-rate-limit-reset'])
-            sleep_duration = max(0, reset_time - int(time.time()) + 5)
-            logging.warning(f"Rate limit exceeded. Waiting for {sleep_duration // 60}m {sleep_duration % 60}s...")
+            sleep_duration = RATE_LIMIT_PAUSE_SECONDS
+            if e.response and 'x-rate-limit-reset' in e.response.headers:
+                reset_time = int(e.response.headers['x-rate-limit-reset'])
+                # Add a 5-second buffer to be safe
+                sleep_duration = max(0, reset_time - int(time.time()) + 5)
+                logging.warning(f"Rate limit hit. Waiting for {sleep_duration // 60}m {sleep_duration % 60}s until reset...")
+            else:
+                logging.warning(f"Rate limit hit. Waiting for a fixed duration of {sleep_duration // 60} minutes...")
             countdown(sleep_duration, "Pausing due to rate limit...")
             logging.info("Resuming unblocking...")
             # Do not increment index, to retry the same user
