@@ -17,8 +17,6 @@ def countdown(seconds, message="Waiting..."):
     logging.info("", extra={'single_line': True}) # Clear the line
 
 # --- Constants ---
-RATE_LIMIT_THRESHOLD = 50
-RATE_LIMIT_PAUSE_SECONDS = 901
 BLOCKED_IDS_FILE = 'blocked_ids.txt'
 UNBLOCKED_IDS_FILE = 'unblocked_ids.txt'
 
@@ -129,7 +127,7 @@ def create_tweepy_clients():
 
         # v1.1 client for fetching blocked IDs
         auth = tweepy.OAuth1UserHandler(api_key, api_key_secret, access_token, access_token_secret)
-        api_v1 = tweepy.API(auth)
+        api_v1 = tweepy.API(auth, wait_on_rate_limit=True)
         
         logging.info("Authentication successful for both API v1.1 and v2.")
         return api_v1, client_v2
@@ -150,19 +148,6 @@ def fetch_blocked_user_ids(api_v1):
             logging.info(f"Found {len(blocked_user_ids)} blocked account IDs...", extra={'single_line': True})
             if cursor == 0:
                 break
-        
-        except tweepy.errors.TooManyRequests as e:
-            sleep_duration = RATE_LIMIT_PAUSE_SECONDS
-            if e.response and 'x-rate-limit-reset' in e.response.headers:
-                reset_time = int(e.response.headers['x-rate-limit-reset'])
-                # Add a 5-second buffer to be safe
-                sleep_duration = max(0, reset_time - int(time.time()) + 5)
-                logging.warning(f"Rate limit hit. Waiting for {sleep_duration // 60}m {sleep_duration % 60}s until reset...")
-            else:
-                logging.warning(f"Rate limit hit. Waiting for a fixed duration of {sleep_duration // 60} minutes...")
-            countdown(sleep_duration, "Pausing due to rate limit...")
-            logging.info("Resuming fetch...")
-            continue
 
         except Exception as e:
             logging.error(f"An unexpected error occurred while fetching: {e}", exc_info=True)
@@ -199,26 +184,7 @@ def unblock_user_ids(client_v2, blocked_user_ids):
             # Display progress relative to the current session's workload
             logging.info(f"({unblocked_count}/{total_to_unblock}) Unblocked user ID: {user_id}", extra={'single_line': True})
 
-            # Check for proactive pause (don't rely on hitting an error)
-            if unblocked_count % RATE_LIMIT_THRESHOLD == 0 and index < len(ids_to_process) - 1:
-                logging.warning(f"Proactive rate limit pause reached. Pausing for {RATE_LIMIT_PAUSE_SECONDS // 60} minutes.")
-                countdown(RATE_LIMIT_PAUSE_SECONDS, "Pausing to respect rate limits...")
-                logging.info("Resuming unblocking...")
-            
             index += 1 # Move to the next user
-
-        except tweepy.errors.TooManyRequests as e:
-            sleep_duration = RATE_LIMIT_PAUSE_SECONDS
-            if e.response and 'x-rate-limit-reset' in e.response.headers:
-                reset_time = int(e.response.headers['x-rate-limit-reset'])
-                # Add a 5-second buffer to be safe
-                sleep_duration = max(0, reset_time - int(time.time()) + 5)
-                logging.warning(f"Rate limit hit. Waiting for {sleep_duration // 60}m {sleep_duration % 60}s until reset...")
-            else:
-                logging.warning(f"Rate limit hit. Waiting for a fixed duration of {sleep_duration // 60} minutes...")
-            countdown(sleep_duration, "Pausing due to rate limit...")
-            logging.info("Resuming unblocking...")
-            # Do not increment index, to retry the same user
 
         except Exception as e:
             logging.error(f"Could not unblock user ID {user_id}. Reason: {e}", exc_info=True)
