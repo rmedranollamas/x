@@ -7,14 +7,31 @@ import argparse
 from dotenv import load_dotenv
 
 def countdown(seconds, message="Waiting..."):
-    """Displays a countdown timer for a given duration using logging."""
-    for i in range(seconds, 0, -1):
-        mins, secs = divmod(i, 60)
-        timer = f"{mins:02d}:{secs:02d}"
-        logging.info(f"{message} {timer}", extra={'single_line': True})
-        time.sleep(1)
-    # Clear the line after countdown finishes
-    logging.info("", extra={'single_line': True}) # Clear the line
+    """Displays a single message and waits for a given duration."""
+    if seconds > 0:
+        logging.info(message)
+        time.sleep(seconds)
+
+def handle_rate_limit(e):
+    """Handles rate limit errors by parsing the reset time and waiting."""
+    # Extract the reset time from the API response
+    try:
+        reset_timestamp = int(e.response.headers.get("x-rate-limit-reset", 0))
+    except (ValueError, TypeError):
+        reset_timestamp = 0
+    
+    if reset_timestamp > 0:
+        # Calculate wait time
+        wait_seconds = max(0, reset_timestamp - int(time.time()))
+        resume_time = time.strftime('%H:%M:%S', time.localtime(reset_timestamp))
+        mins = round(wait_seconds / 60)
+        
+        # Log and start countdown
+        countdown_message = f"Rate limit reached. Waiting for ~{mins} minutes. Resuming at {resume_time}."
+        countdown(wait_seconds, countdown_message)
+    else:
+        # Fallback if the header is missing
+        countdown(15 * 60, "Rate limit reached, but reset time is unknown. Waiting for 15 minutes as a fallback.")
 
 # --- Constants ---
 BLOCKED_IDS_FILE = 'blocked_ids.txt'
@@ -120,14 +137,14 @@ def create_tweepy_clients():
             consumer_secret=api_key_secret,
             access_token=access_token,
             access_token_secret=access_token_secret,
-            wait_on_rate_limit=True,
+            wait_on_rate_limit=False,
         )
         auth_user = client_v2.get_me(user_fields=["id"])
         logging.debug(f"Authenticated as user ID: {auth_user.data.id}")
 
         # v1.1 client for fetching blocked IDs
         auth = tweepy.OAuth1UserHandler(api_key, api_key_secret, access_token, access_token_secret)
-        api_v1 = tweepy.API(auth, wait_on_rate_limit=True)
+        api_v1 = tweepy.API(auth, wait_on_rate_limit=False)
         
         logging.info("Authentication successful for both API v1.1 and v2.")
         return api_v1, client_v2
@@ -148,6 +165,11 @@ def fetch_blocked_user_ids(api_v1):
             logging.info(f"Found {len(blocked_user_ids)} blocked account IDs...", extra={'single_line': True})
             if cursor == 0:
                 break
+        
+        except tweepy.errors.TooManyRequests as e:
+            handle_rate_limit(e)
+            # After waiting, the loop will retry with the same cursor
+            continue
 
         except Exception as e:
             logging.error(f"An unexpected error occurred while fetching: {e}", exc_info=True)
@@ -182,9 +204,15 @@ def unblock_user_ids(client_v2, blocked_user_ids):
             logging.debug(f"Successfully unblocked and recorded user ID: {user_id}.")
             
             # Display progress relative to the current session's workload
-            logging.info(f"({unblocked_count}/{total_to_unblock}) Unblocked user ID: {user_id}", extra={'single_line': True})
+            remaining = total_to_unblock - (index + 1)
+            logging.info(f"({unblocked_count}/{total_to_unblock}) Successfully unblocked user ID: {user_id}. Remaining: {remaining}.")
 
             index += 1 # Move to the next user
+
+        except tweepy.errors.TooManyRequests as e:
+            handle_rate_limit(e)
+            # After waiting, the loop will retry the same user ID
+            continue
 
         except Exception as e:
             logging.error(f"Could not unblock user ID {user_id}. Reason: {e}", exc_info=True)
