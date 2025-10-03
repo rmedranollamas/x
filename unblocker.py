@@ -15,7 +15,10 @@ def countdown(seconds, message="Waiting..."):
 def handle_rate_limit(e):
     """Handles rate limit errors by parsing the reset time and waiting."""
     # Extract the reset time from the API response
-    reset_timestamp = int(e.response.headers.get("x-rate-limit-reset", 0))
+    try:
+        reset_timestamp = int(e.response.headers.get("x-rate-limit-reset", 0))
+    except (ValueError, TypeError):
+        reset_timestamp = 0
     
     if reset_timestamp > 0:
         # Calculate wait time
