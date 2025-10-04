@@ -209,3 +209,9 @@ __marimo__/
 # Local state files
 blocked_ids.txt
 unblocked_ids.txt
+
+# gemini-cli settings
+.gemini/
+
+# GitHub App credentials
+gha-creds-*.json

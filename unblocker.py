@@ -281,6 +281,12 @@ def unblock_user_ids(
             failed_ids.append(user_id)
             index += 1  # Move to the next user after a failure
 
+    logging.info("--- Unblocking Process Complete! ---")
+    logging.info(f"Total accounts unblocked in this session: {session_unblocked_count}")
+    if failed_ids:
+        logging.warning(f"Failed to unblock {len(failed_ids)} accounts. Check logs for details.")
+        logging.warning(f"Failed IDs: {failed_ids}")
+
 
 def main():
     """
