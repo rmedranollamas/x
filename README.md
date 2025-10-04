@@ -13,7 +13,7 @@ It uses the X API v1.1 for unblocking and fetching blocked accounts, and the v2 
 
 ## Requirements
 
-*   Python 3.12+
+*   Python 3.13+
 *   An X Developer Account with an App that has v1.1 and v2 API access.
 
 ## Setup Instructions
