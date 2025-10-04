@@ -2,27 +2,23 @@
 
 ## Project Overview
 
-This project contains a Python command-line tool designed to unblock all blocked accounts on the user's X (formerly Twitter) profile. It interacts directly with the X API v2.
+This project contains a Python command-line tool designed to unblock all blocked accounts on the user's X (formerly Twitter) profile. It uses the X API v1.1 to fetch blocked user IDs and perform the unblock operations, and the v2 API for an initial authentication check.
 
 The main logic is encapsulated in `unblocker.py`. The script authenticates using user-provided credentials, fetches a complete list of blocked accounts, and then iterates through that list, unblocking each user one by one.
 
-A key feature of this tool is its built-in handling of X API rate limits. The script will automatically pause for 15 minutes after every 50 unblock operations to avoid being rate-limited, making it suitable for users with a large number of blocked accounts.
+A key feature of this tool is its built-in handling of X API rate limits. The script will automatically pause when it hits a rate limit and resume when the window resets.
+
+The script also persists its state in `blocked_ids.txt` (the full list of blocked accounts) and `unblocked_ids.txt` (a running list of accounts that have been successfully unblocked). This allows the script to be stopped and restarted without losing progress.
 
 ## Building and Running
 
-This is a Python project. The primary dependencies are `tweepy` for X API interaction and `python-dotenv` for managing credentials.
+This is a Python project managed with `uv`. The primary dependencies are `tweepy` for X API interaction and `python-dotenv` for managing credentials.
 
 **1. Setup:**
 
-It is recommended to use a Python virtual environment, specifically in the `.venv` directory.
-
 ```bash
-# Create and activate the virtual environment in .venv
-python -m venv .venv
-source .venv/bin/activate
-
 # Install dependencies
-pip install -r requirements.txt
+uv pip sync
 
 # Configure credentials
 cp .env.example .env
@@ -34,7 +30,7 @@ cp .env.example .env
 Once the setup is complete, the tool can be run with the following command:
 
 ```bash
-python unblocker.py
+uv run python unblocker.py
 ```
 
 There are no build steps or tests included in this project.
@@ -42,6 +38,7 @@ There are no build steps or tests included in this project.
 ## Development Conventions
 
 *   **Credentials Management:** API keys and secrets are managed via a `.env` file and should not be hard-coded. The `.env.example` file serves as a template.
-*   **Error Handling:** The script includes basic error handling for missing credentials and API authentication failures, exiting gracefully with informative messages.
-*   **User Experience:** The script provides clear feedback to the user, including progress indicators (`.`), countdown timers for rate-limit pauses, and a final summary of unblocked accounts.
-*   **Code Style:** The code is procedural, with a clear `main` function as the entry point. It uses standard Python libraries and follows basic PEP 8 conventions.
+*   **State Persistence:** The script saves the full list of blocked IDs and the list of successfully unblocked IDs to local text files (`blocked_ids.txt`, `unblocked_ids.txt`) to allow for resumption.
+*   **Error Handling:** The script includes error handling for missing credentials, API authentication failures, and cases where a blocked user no longer exists.
+*   **User Experience:** The script provides clear, single-line progress updates, including the username of the unblocked account and an accurate count of remaining users. It also displays countdown timers for rate-limit pauses.
+*   **Code Style:** The code is procedural, with a clear `main` function as the entry point. It uses standard Python libraries and is formatted with `ruff`.
