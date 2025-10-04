@@ -18,7 +18,7 @@ This is a Python project managed with `uv`. The primary dependencies are `tweepy
 
 ```bash
 # Install dependencies
-uv pip install -r requirements.txt
+uv pip sync
 
 # Configure credentials
 cp .env.example .env
