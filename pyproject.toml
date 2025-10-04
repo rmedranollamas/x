@@ -1,7 +1,7 @@
 [project]
-name = "x"
+name = "x-unblocker"
 version = "0.1.0"
-description = "Add your description here"
+description = "A command-line tool to unblock all blocked accounts on X."
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
