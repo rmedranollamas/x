@@ -140,12 +140,3 @@ class UnblockAgent(BaseAgent):
                 f"Failed to unblock {len(failed_ids)} accounts. Check logs for details."
             )
             logging.warning(f"Failed IDs: {failed_ids}")
-
-    def _is_user_not_found_error(self, user_id):
-        """
-        A placeholder to simulate checking for a "Not Found" error condition.
-        In a real implementation, the XService would provide a clearer status.
-        """
-        # This is a simplification. We assume that if the user_details is None,
-        # and we can't find them again, they are "not found".
-        return True
