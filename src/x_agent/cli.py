@@ -19,18 +19,18 @@ class SingleLineUpdateHandler(logging.StreamHandler):
             if self._last_single_line_length > len(message):
                 print(
                     " " * self._last_single_line_length,
-                    end="\\r",
+                    end="\r",
                     file=sys.stdout,
                     flush=True,
                 )
-            print(f"\\r{message}", end="", file=sys.stdout, flush=True)
+            print(f"\r{message}", end="", file=sys.stdout, flush=True)
             self._last_single_line_length = len(message)
         else:
             # If a non-single-line record comes, clear any active single-line message
             if self._last_single_line_length > 0:
                 print(
                     " " * self._last_single_line_length,
-                    end="\\r",
+                    end="\r",
                     file=sys.stdout,
                     flush=True,
                 )
