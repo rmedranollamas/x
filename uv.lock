@@ -121,7 +121,7 @@ wheels = [
 ]
 
 [[package]]
-name = "x"
+name = "x-agent"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [

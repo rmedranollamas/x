@@ -1,15 +1,16 @@
-# X Unblocker Tool
+# X Agent Framework
 
-This is a simple command-line tool to unblock every account you have blocked on X (formerly Twitter).
+This is a command-line tool to manage your X (formerly Twitter) account using a collection of specialized agents. The first available agent is the `unblock` agent, which unblocks every account you have blocked.
 
-It uses the X API v1.1 for unblocking and fetching blocked accounts, and the v2 API for authentication. It automatically handles rate limiting, gracefully skips over accounts that no longer exist, and saves your progress.
+The framework is designed to be extensible, allowing for the easy addition of new agents to perform various tasks on your X profile. It uses the X API, automatically handles rate limiting, gracefully skips over accounts that no longer exist, and saves progress for resumable operations.
 
 ## Features
 
-*   **Resumable:** The script saves its progress. You can stop it at any time and restart it later without losing your place.
+*   **Extensible:** Easily add new agents for different tasks.
+*   **Resumable:** The `unblock` agent saves its progress. You can stop it at any time and restart it later without losing your place.
 *   **Rate Limit Handling:** Automatically pauses and resumes when it hits the X API rate limit.
 *   **Robust:** If it encounters an account that has been deleted or suspended, it logs the issue and continues.
-*   **Informative Logging:** Provides a running count of unblocked accounts, the username of the last person unblocked, and the total number remaining.
+*   **Informative Logging:** Provides a running count of actions, the username of the last person interacted with, and the total number remaining.
 
 ## Requirements
 
@@ -31,8 +32,9 @@ It uses the X API v1.1 for unblocking and fetching blocked accounts, and the v2 
     ```
 
 3.  **Install Dependencies:**
+    Install the project in editable mode. This allows you to run the script from anywhere and ensures any changes you make are immediately available.
     ```bash
-    uv pip sync
+    uv pip install -e .
     ```
 
 4.  **Set Up Your Credentials:**
@@ -49,10 +51,11 @@ It uses the X API v1.1 for unblocking and fetching blocked accounts, and the v2 
 
 ## How to Run
 
-Once you have completed the setup, you can run the tool with the following command:
+Once you have completed the setup, you can run the tool using the `x-agent` command followed by the name of the agent you want to use.
 
+To run the unblocker agent:
 ```bash
-uv run python unblocker.py
+uv run x-agent unblock
 ```
 
 The script will then:
