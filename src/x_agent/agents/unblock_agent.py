@@ -106,17 +106,18 @@ class UnblockAgent(BaseAgent):
         for user_id in ids_to_unblock:
             user_details = self.x_service.unblock_user(user_id)
 
-            # unblock_user returns None if the user was not found or another error occurred.
-            # If the user was not found, it's already logged, and we should treat it as "completed".
-            if user_details is None:
-                # Check if the reason for failure was NotFound. If so, we mark as complete.
-                # This is a simplification; in a real scenario, XService would return a more specific status.
-                # For now, we assume any `None` where the user might not exist is skippable.
-                if not self._is_user_not_found_error(user_id):  # A hypothetical check
-                    failed_ids.append(user_id)
-
-                # In either case (NotFound or other error), we record it to avoid retries.
+            # unblock_user returns a user object on success, "NOT_FOUND" for deleted users,
+            # and None for other errors.
+            if user_details == "NOT_FOUND":
+                # User not found, so we can consider the "unblocking" task for this ID complete.
                 self._append_id_to_file(self.UNBLOCKED_IDS_FILE, user_id)
+                continue
+
+            if user_details is None:
+                # A non-specific error occurred, which was logged by the service.
+                # We'll add it to the list of failures for this session and not mark it as complete,
+                # allowing it to be retried on the next run.
+                failed_ids.append(user_id)
                 continue
 
             session_unblocked_count += 1
