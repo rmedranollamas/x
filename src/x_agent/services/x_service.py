@@ -135,7 +135,7 @@ class XService:
                 logging.warning(
                     f"User ID {user_id} not found. The account may have been deleted. Skipping."
                 )
-                return None
+                return "NOT_FOUND"
             except Exception as e:
                 logging.error(
                     f"Could not unblock user ID {user_id}. Reason: {e}", exc_info=True
