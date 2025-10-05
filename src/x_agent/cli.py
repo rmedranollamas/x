@@ -79,12 +79,12 @@ def main():
     try:
         x_service = XService()
 
-        if args.agent == "unblock":
-            agent = UnblockAgent(x_service)
-            agent.execute()
-        else:
-            logging.error(f"Unknown agent: {args.agent}")
-            sys.exit(1)
+        AGENTS = {
+            "unblock": UnblockAgent,
+        }
+        agent_class = AGENTS[args.agent]
+        agent = agent_class(x_service)
+        agent.execute()
 
     except Exception as e:
         logging.error(f"An unexpected error occurred: {e}", exc_info=True)
