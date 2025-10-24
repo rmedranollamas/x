@@ -35,7 +35,7 @@ class SingleLineUpdateHandler(logging.StreamHandler):
                     flush=True,
                 )
                 self._last_single_line_length = 0
-            print(message, file=sys.stdout, flush=True)
+            print(message, file=self.stream, flush=True)
 
 
 def setup_logging(debug=False):
@@ -48,7 +48,7 @@ def setup_logging(debug=False):
     for handler in logger.handlers[:]:
         logger.removeHandler(handler)
 
-    handler = SingleLineUpdateHandler()
+    handler = SingleLineUpdateHandler(sys.stdout)
     formatter = logging.Formatter(
         "%(asctime)s - %(levelname)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
     )
