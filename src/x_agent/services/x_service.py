@@ -12,20 +12,29 @@ class XService:
     Handles client authentication, rate limiting, and API calls.
     """
 
-    def __init__(self):
-        """
-        Initializes the XService by loading credentials and creating API clients.
-        """
+    def __init__(self) -> None:
+        """Initializes the XService, creating authenticated API clients."""
         self.api_v1, self.client_v2 = self._create_tweepy_clients()
 
-    def _countdown(self, seconds, message="Waiting..."):
-        """Displays a single message and waits for a given duration."""
+    def _countdown(self, seconds: int, message: str = "Waiting...") -> None:
+        """
+        Displays a message and waits for a specified duration.
+
+        Args:
+            seconds (int): The number of seconds to wait.
+            message (str): The message to display while waiting.
+        """
         if seconds > 0:
             logging.info(message)
             time.sleep(seconds)
 
-    def _handle_rate_limit(self, e):
-        """Handles rate limit errors by parsing the reset time and waiting."""
+    def _handle_rate_limit(self, e: tweepy.errors.TooManyRequests) -> None:
+        """
+        Handles API rate limit errors by waiting for the reset time.
+
+        Args:
+            e (tweepy.errors.TooManyRequests): The rate limit exception.
+        """
         try:
             reset_timestamp = int(e.response.headers.get("x-rate-limit-reset", 0))
         except (ValueError, TypeError):
@@ -37,14 +46,20 @@ class XService:
             mins = round(wait_seconds / 60)
             countdown_message = f"Rate limit reached. Waiting for ~{mins} minutes. Resuming at {resume_time}."
             self._countdown(wait_seconds, countdown_message)
-        else:
-            self._countdown(
-                15 * 60,
-                "Rate limit reached, but reset time is unknown. Waiting for 15 minutes as a fallback.",
-            )
+            return
 
-    def _create_tweepy_clients(self):
-        """Loads credentials and creates authenticated Tweepy clients."""
+        self._countdown(
+            15 * 60,
+            "Rate limit reached, but reset time is unknown. Waiting for 15 minutes as a fallback.",
+        )
+
+    def _get_credentials(self) -> tuple[str, str, str, str]:
+        """
+        Loads and validates API credentials from the .env file.
+
+        Returns:
+            A tuple containing the API key, secret, access token, and secret.
+        """
         logging.debug("Loading environment variables from .env file...")
         load_dotenv()
         logging.debug("Environment variables loaded.")
@@ -59,9 +74,22 @@ class XService:
             sys.exit(1)
 
         logging.info("Successfully loaded API credentials.")
+        return api_key, api_key_secret, access_token, access_token_secret
 
+    def _create_v2_client(
+        self,
+        api_key: str,
+        api_key_secret: str,
+        access_token: str,
+        access_token_secret: str,
+    ) -> tweepy.Client:
+        """
+        Creates and authenticates the Tweepy v2 client.
+
+        Returns:
+            An authenticated Tweepy v2 client.
+        """
         try:
-            logging.info("Authenticating with the X API...")
             client_v2 = tweepy.Client(
                 consumer_key=api_key,
                 consumer_secret=api_key_secret,
@@ -71,20 +99,63 @@ class XService:
             )
             auth_user = client_v2.get_me(user_fields=["id"])
             logging.debug(f"Authenticated as user ID: {auth_user.data.id}")
+            return client_v2
+        except Exception as e:
+            logging.error(f"Error during API v2 authentication: {e}", exc_info=True)
+            sys.exit(1)
 
+    def _create_v1_client(
+        self,
+        api_key: str,
+        api_key_secret: str,
+        access_token: str,
+        access_token_secret: str,
+    ) -> tweepy.API:
+        """
+        Creates and authenticates the Tweepy v1.1 client.
+
+        Returns:
+            An authenticated Tweepy v1.1 API object.
+        """
+        try:
             auth = tweepy.OAuth1UserHandler(
                 api_key, api_key_secret, access_token, access_token_secret
             )
             api_v1 = tweepy.API(auth, wait_on_rate_limit=False)
-
-            logging.info("Authentication successful for both API v1.1 and v2.")
-            return api_v1, client_v2
+            return api_v1
         except Exception as e:
-            logging.error(f"Error during API authentication: {e}", exc_info=True)
+            logging.error(f"Error during API v1.1 authentication: {e}", exc_info=True)
             sys.exit(1)
 
-    def get_blocked_user_ids(self):
-        """Fetches the complete list of blocked user IDs from the API."""
+    def _create_tweepy_clients(self) -> tuple[tweepy.API, tweepy.Client]:
+        """
+        Loads credentials and creates authenticated Tweepy clients.
+
+        Returns:
+            A tuple containing the v1.1 API object and the v2 client.
+        """
+        api_key, api_key_secret, access_token, access_token_secret = (
+            self._get_credentials()
+        )
+
+        logging.info("Authenticating with the X API...")
+        client_v2 = self._create_v2_client(
+            api_key, api_key_secret, access_token, access_token_secret
+        )
+        api_v1 = self._create_v1_client(
+            api_key, api_key_secret, access_token, access_token_secret
+        )
+
+        logging.info("Authentication successful for both API v1.1 and v2.")
+        return api_v1, client_v2
+
+    def get_blocked_user_ids(self) -> set[int]:
+        """
+        Fetches the complete list of blocked user IDs from the API.
+
+        Returns:
+            A set of integer user IDs.
+        """
         logging.info("Fetching blocked account IDs... (This will be fast)")
         blocked_user_ids = set()
         cursor = -1
@@ -113,15 +184,16 @@ class XService:
         )
         return blocked_user_ids
 
-    def unblock_user(self, user_id):
+    def unblock_user(self, user_id: int) -> tweepy.User | str | None:
         """
         Unblocks a single user by their ID.
 
         Args:
-            user_id (int): The ID of the user to unblock.
+            user_id: The integer ID of the user to unblock.
 
         Returns:
-            tweepy.User: The user object of the unblocked user, or None on failure.
+            The user object if successful, 'NOT_FOUND' if the user does not exist,
+            or None if an error occurs.
         """
         while True:
             try:

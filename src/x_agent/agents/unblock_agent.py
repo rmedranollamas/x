@@ -9,20 +9,28 @@ class UnblockAgent(BaseAgent):
     An agent responsible for unblocking all blocked users on an X account.
     """
 
-    BLOCKED_IDS_FILE = "blocked_ids.txt"
-    UNBLOCKED_IDS_FILE = "unblocked_ids.txt"
+    BLOCKED_IDS_FILE = ".state/blocked_ids.txt"
+    UNBLOCKED_IDS_FILE = ".state/unblocked_ids.txt"
 
-    def __init__(self, x_service: XService):
+    def __init__(self, x_service: XService) -> None:
         """
-        Initializes the UnblockAgent with a dependency on the XService.
+        Initializes the agent with a service to interact with the X API.
 
         Args:
-            x_service (XService): An instance of the XService to interact with the X API.
+            x_service: An instance of XService.
         """
         self.x_service = x_service
 
-    def _load_ids_from_file(self, filename):
-        """Loads a set of user IDs from a text file."""
+    def _load_ids_from_file(self, filename: str) -> set[int]:
+        """
+        Loads a set of user IDs from a text file, skipping invalid entries.
+
+        Args:
+            filename: The path to the file.
+
+        Returns:
+            A set of integer user IDs.
+        """
         if not os.path.exists(filename):
             return set()
         ids = set()
@@ -38,20 +46,35 @@ class UnblockAgent(BaseAgent):
                         )
         return ids
 
-    def _save_ids_to_file(self, filename, ids):
-        """Saves a list or set of user IDs to a text file."""
+    def _save_ids_to_file(self, filename: str, ids: set[int]) -> None:
+        """
+        Saves a set of user IDs to a text file.
+
+        Args:
+            filename: The path to the file.
+            ids: A set of integer user IDs to save.
+        """
         with open(filename, "w") as f:
             for user_id in ids:
                 f.write(f"{user_id}\n")
 
-    def _append_id_to_file(self, filename, user_id):
-        """Appends a single user ID to a text file."""
+    def _append_id_to_file(self, filename: str, user_id: int) -> None:
+        """
+        Appends a single user ID to a text file.
+
+        Args:
+            filename: The path to the file.
+            user_id: The integer user ID to append.
+        """
         with open(filename, "a") as f:
             f.write(f"{user_id}\n")
 
-    def execute(self):
+    def execute(self) -> None:
         """
-        Executes the main logic of the unblocking agent.
+        Executes the main logic of the agent.
+
+        Fetches the list of blocked users, compares it with already unblocked
+        users, and unblocks the remaining accounts.
         """
         logging.info("--- X Unblock Agent ---")
 
@@ -90,11 +113,18 @@ class UnblockAgent(BaseAgent):
 
     def _unblock_user_ids(
         self,
-        ids_to_unblock,
-        total_blocked_count,
-        already_unblocked_count,
-    ):
-        """Iterates through the list of user IDs and unblocks them."""
+        ids_to_unblock: set[int],
+        total_blocked_count: int,
+        already_unblocked_count: int,
+    ) -> None:
+        """
+        Iterates through a set of user IDs and unblocks each one.
+
+        Args:
+            ids_to_unblock: A set of user IDs to unblock.
+            total_blocked_count: The total number of users who were blocked.
+            already_unblocked_count: The number of users already unblocked.
+        """
         total_to_unblock_session = len(ids_to_unblock)
         logging.info(
             f"Starting the unblocking process for {total_to_unblock_session} accounts..."
