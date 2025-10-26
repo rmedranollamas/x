@@ -86,10 +86,14 @@ class UnblockAgent(BaseAgent):
                 "No local cache of blocked IDs found. Fetching from the API..."
             )
             all_blocked_ids = self.x_service.get_blocked_user_ids()
-            self._save_ids_to_file(self.BLOCKED_IDS_FILE, all_blocked_ids)
-            logging.info(
-                f"Saved {len(all_blocked_ids)} blocked IDs to {self.BLOCKED_IDS_FILE}."
-            )
+            if all_blocked_ids:
+                self._save_ids_to_file(self.BLOCKED_IDS_FILE, all_blocked_ids)
+                logging.info(
+                    f"Saved {len(all_blocked_ids)} blocked IDs to {self.BLOCKED_IDS_FILE}."
+                )
+            else:
+                logging.info("No blocked IDs found from the API.")
+                return
         else:
             logging.info(
                 f"Loaded {len(all_blocked_ids)} blocked IDs from {self.BLOCKED_IDS_FILE}."
