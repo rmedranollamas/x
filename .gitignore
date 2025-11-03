@@ -215,3 +215,4 @@ unblocked_ids.txt
 
 # GitHub App credentials
 gha-creds-*.json
+.state/

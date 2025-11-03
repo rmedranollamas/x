@@ -3,6 +3,7 @@ import logging
 import argparse
 from .services.x_service import XService
 from .agents.unblock_agent import UnblockAgent
+from .agents.insights_agent import InsightsAgent
 from .logging_setup import setup_logging
 
 
@@ -18,8 +19,8 @@ def main() -> None:
     )
     parser.add_argument(
         "agent",
-        choices=["unblock"],
-        help="The agent to run. Currently available: 'unblock'.",
+        choices=["unblock", "insights"],
+        help="The agent to run. Available: 'unblock', 'insights'.",
     )
     parser.add_argument(
         "--debug", action="store_true", help="Enable debug logging for detailed output."
@@ -33,10 +34,11 @@ def main() -> None:
 
         AGENTS = {
             "unblock": UnblockAgent,
+            "insights": InsightsAgent,
         }
         agent_class = AGENTS[args.agent]
-        agent = agent_class(x_service)
-        agent.execute()
+        agent = agent_class()
+        agent.execute(x_service)
 
     except Exception as e:
         logging.error(f"An unexpected error occurred: {e}", exc_info=True)

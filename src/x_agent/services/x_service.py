@@ -213,3 +213,18 @@ class XService:
                     f"Could not unblock user ID {user_id}. Reason: {e}", exc_info=True
                 )
                 return None
+
+    def get_me(self) -> tweepy.User | None:
+        """
+        Retrieves the authenticated user's public metrics.
+
+        Returns:
+            The user object with public metrics, or None if an error occurs.
+        """
+        try:
+            logging.debug("Fetching authenticated user's metrics...")
+            auth_user = self.client_v2.get_me(user_fields=["public_metrics"])
+            return auth_user.data
+        except Exception as e:
+            logging.error(f"Error fetching user metrics: {e}", exc_info=True)
+            return None
