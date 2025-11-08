@@ -1,17 +1,25 @@
-
 import logging
 from .base_agent import BaseAgent
 from ..services.x_service import XService
 from .. import database
+
 
 class InsightsAgent(BaseAgent):
     """An agent for gathering and reporting daily account insights."""
 
     agent_name = "insights"
 
-    def execute(self, x_service: XService):
-        """Runs the insights agent to generate and store the daily report."""
+    def __init__(self, x_service: XService) -> None:
+        """
+        Initializes the agent with a service to interact with the X API.
+
+        Args:
+            x_service: An instance of XService.
+        """
         self.x_service = x_service
+
+    def execute(self) -> None:
+        """Runs the insights agent to generate and store the daily report."""
         logging.info("Starting the insights agent...")
         database.initialize_database()
 
@@ -46,8 +54,12 @@ class InsightsAgent(BaseAgent):
             follower_change = current_followers - prev_followers
             following_change = current_following - prev_following
 
-            report_lines.append(f"Followers: {current_followers} ({follower_change:+.0f})")
-            report_lines.append(f"Following: {current_following} ({following_change:+.0f})")
+            report_lines.append(
+                f"Followers: {current_followers} ({follower_change:+.0f})"
+            )
+            report_lines.append(
+                f"Following: {current_following} ({following_change:+.0f})"
+            )
         else:
             report_lines.append(f"Followers: {current_followers} (First run)")
             report_lines.append(f"Following: {current_following} (First run)")

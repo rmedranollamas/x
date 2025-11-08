@@ -37,8 +37,8 @@ def main() -> None:
             "insights": InsightsAgent,
         }
         agent_class = AGENTS[args.agent]
-        agent = agent_class()
-        agent.execute(x_service)
+        agent = agent_class(x_service)
+        agent.execute()
 
     except Exception as e:
         logging.error(f"An unexpected error occurred: {e}", exc_info=True)
