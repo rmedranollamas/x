@@ -15,7 +15,7 @@ def mock_x_service():
 @pytest.fixture
 def unblock_agent(mock_x_service):
     """Fixture for an UnblockAgent instance with a mocked XService."""
-    return UnblockAgent(x_service=mock_x_service)
+    return UnblockAgent()
 
 
 @pytest.fixture
