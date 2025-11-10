@@ -40,13 +40,15 @@ def initialize_database():
 def add_insight(followers, following):
     """Adds a new insight record to the database."""
     conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        "INSERT INTO insights (followers, following) VALUES (?, ?)",
-        (followers, following),
-    )
-    conn.commit()
-    conn.close()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO insights (followers, following) VALUES (?, ?)",
+            (followers, following)
+        )
+        conn.commit()
+    finally:
+        conn.close()
     logging.info(f"Added new insight: {followers} followers, {following} following.")
 
 
