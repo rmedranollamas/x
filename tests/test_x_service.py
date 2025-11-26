@@ -121,10 +121,17 @@ def test_handle_rate_limit_unknown_reset_time(x_service, caplog):
 
 def test_get_blocked_user_ids_success(x_service, mock_tweepy_api_v1, caplog):
     """Test fetching blocked user IDs successfully."""
-    mock_tweepy_api_v1.get_blocked_ids.side_effect = [
-        ([101, 102], (None, 1)),  # First call, returns some IDs and a next_cursor
-        ([103], (None, 0)),  # Second call, returns more IDs and cursor 0 (end)
-    ]
+
+    class MockResultSet(list):
+        def __init__(self, items, next_cursor):
+            super().__init__(items)
+            self.next_cursor = next_cursor
+
+    # Mock return values for two pages
+    page1 = MockResultSet([101, 102], next_cursor=1)
+    page2 = MockResultSet([103], next_cursor=0)
+
+    mock_tweepy_api_v1.get_blocked_ids.side_effect = [page1, page2]
 
     with caplog.at_level(os.environ.get("LOG_LEVEL", "INFO")):
         blocked_ids = x_service.get_blocked_user_ids()

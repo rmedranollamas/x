@@ -28,8 +28,12 @@ def mock_db():
 def test_execute_no_blocked_ids_initially(unblock_agent, mock_x_service, mock_db):
     """Test execute when no blocked IDs are in the database and the API returns some."""
     # --- Arrange ---
-    # Mock the database to simulate no cached IDs
-    mock_db.get_all_blocked_ids_from_db.return_value = set()
+    # Mock the database to simulate behavior:
+    # 1. Agent fetches from API -> returns {1, 2, 3}
+    # 2. Agent saves to DB.
+    # 3. Agent reads from DB.
+    # So, the read call should return the synced IDs.
+    mock_db.get_all_blocked_ids_from_db.return_value = {1, 2, 3}
     mock_db.get_unblocked_ids_from_db.return_value = set()
 
     # Mock the API to return a list of blocked IDs
@@ -68,7 +72,8 @@ def test_execute_all_unblocked_from_start(unblock_agent, mock_x_service, mock_db
 
     unblock_agent.execute()
 
-    mock_x_service.get_blocked_user_ids.assert_not_called()
+    # API should be checked for updates
+    mock_x_service.get_blocked_user_ids.assert_called_once()
     mock_x_service.unblock_user.assert_not_called()
 
 
@@ -84,7 +89,8 @@ def test_execute_resumes_unblocking(unblock_agent, mock_x_service, mock_db):
 
     unblock_agent.execute()
 
-    mock_x_service.get_blocked_user_ids.assert_not_called()
+    # API should be checked for updates
+    mock_x_service.get_blocked_user_ids.assert_called_once()
     assert mock_x_service.unblock_user.call_count == 3
     assert mock_db.mark_user_as_unblocked_in_db.call_count == 3
 

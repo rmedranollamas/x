@@ -29,26 +29,26 @@ class UnblockAgent(BaseAgent):
         database.initialize_database()
 
         # --- State Loading and Resumption Logic ---
+        logging.info("Fetching latest blocked IDs from the API to sync...")
+        api_blocked_ids = self.x_service.get_blocked_user_ids()
+
+        if api_blocked_ids:
+            database.add_blocked_ids_to_db(api_blocked_ids)
+            logging.info(
+                f"Synced {len(api_blocked_ids)} blocked IDs from API to database."
+            )
+        else:
+            logging.info("No blocked IDs returned from the API.")
+
         all_blocked_ids = database.get_all_blocked_ids_from_db()
 
         if not all_blocked_ids:
-            logging.info(
-                "No local cache of blocked IDs found. Fetching from the API..."
-            )
-            api_blocked_ids = self.x_service.get_blocked_user_ids()
-            if api_blocked_ids:
-                database.add_blocked_ids_to_db(api_blocked_ids)
-                all_blocked_ids = api_blocked_ids
-                logging.info(
-                    f"Saved {len(all_blocked_ids)} blocked IDs to the database."
-                )
-            else:
-                logging.info("No blocked IDs found from the API.")
-                return
-        else:
-            logging.info(
-                f"Loaded {len(all_blocked_ids)} blocked IDs from the database."
-            )
+            logging.info("No blocked IDs found in database or API. Nothing to do.")
+            return
+
+        logging.info(
+            f"Total blocked IDs tracked in database: {len(all_blocked_ids)}"
+        )
 
         completed_ids = database.get_unblocked_ids_from_db()
         logging.info(
