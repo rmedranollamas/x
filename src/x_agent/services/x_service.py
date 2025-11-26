@@ -162,9 +162,10 @@ class XService:
         while True:
             try:
                 logging.debug(f"Fetching blocked IDs with cursor: {cursor}")
-                # In Tweepy v4, get_blocked_ids returns a ResultSet (list subclass)
-                # containing the IDs, with a 'next_cursor' attribute.
-                ids = self.api_v1.get_blocked_ids(cursor=cursor)
+                # The response is a tuple: (list_of_ids, (previous_cursor, next_cursor))
+                raw_response = self.api_v1.get_blocked_ids(cursor=cursor)
+                ids = raw_response[0]
+                next_cursor = raw_response[1][1]
 
                 logging.debug(f"Raw IDs received from API: {ids}")
                 blocked_user_ids.update(ids)
@@ -172,7 +173,7 @@ class XService:
                     f"Found {len(blocked_user_ids)} blocked account IDs...",
                     extra={"single_line": True},
                 )
-                cursor = ids.next_cursor
+                cursor = next_cursor
                 if cursor == 0:
                     break
             except tweepy.errors.TooManyRequests as e:
