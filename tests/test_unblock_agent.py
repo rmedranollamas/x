@@ -77,13 +77,16 @@ def test_execute_all_unblocked_from_start(unblock_agent, mock_x_service, mock_db
 
 
 def test_execute_resumes_unblocking(unblock_agent, mock_x_service, mock_db):
-    """Test execute resumes unblocking from where it left off."""
+    """Test execute attempts to unblock all users returned by API, ignoring stale local state."""
     mock_db.get_all_blocked_ids_from_db.return_value = {1, 2, 3, 4, 5}
     mock_db.get_unblocked_ids_from_db.return_value = {1, 2}
     # The agent now relies on the API return for the queue order
     mock_x_service.get_blocked_user_ids.return_value = [1, 2, 3, 4, 5]
 
+    # It should try to unblock ALL 5, even if 1 and 2 are in 'unblocked' DB (re-blocked case)
     mock_x_service.unblock_user.side_effect = [
+        MagicMock(screen_name="user1"),
+        MagicMock(screen_name="user2"),
         MagicMock(screen_name="user3"),
         MagicMock(screen_name="user4"),
         MagicMock(screen_name="user5"),
@@ -93,8 +96,8 @@ def test_execute_resumes_unblocking(unblock_agent, mock_x_service, mock_db):
 
     # API should be checked for updates
     mock_x_service.get_blocked_user_ids.assert_called_once()
-    assert mock_x_service.unblock_user.call_count == 3
-    assert mock_db.mark_user_as_unblocked_in_db.call_count == 3
+    assert mock_x_service.unblock_user.call_count == 5
+    assert mock_db.mark_user_as_unblocked_in_db.call_count == 5
 
 
 def test_execute_handles_not_found_users(unblock_agent, mock_x_service, mock_db):

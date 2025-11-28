@@ -37,34 +37,35 @@ class UnblockAgent(BaseAgent):
             logging.info(
                 f"Synced {len(api_blocked_ids)} blocked IDs from API to database."
             )
+            # If we have fresh data from the API, trust it 100%.
+            # Any ID returned by the API is currently blocked and must be unblocked.
+            # We do NOT filter by 'completed_ids' here because a user might have been
+            # unblocked in the past (and marked as such in DB) but is now re-blocked.
+            ids_to_unblock = api_blocked_ids
+            total_count = len(ids_to_unblock)
+            # For reporting purposes, we can count how many we *thought* were done
+            completed_ids = database.get_unblocked_ids_from_db()
+            already_unblocked_count = len(completed_ids)
+
         else:
             logging.info("No blocked IDs returned from the API.")
+            # Fallback to DB if API returned nothing (and didn't crash).
+            # This path is rare given XService implementation but good for safety.
+            all_blocked_ids = list(database.get_all_blocked_ids_from_db())
+            
+            if not all_blocked_ids:
+                logging.info("No blocked IDs found in database or API. Nothing to do.")
+                return
 
-        # We use the API list as the primary source for the queue to preserve order (newest first).
-        # If the API failed (empty list) but we have DB cache, we might fall back to DB (unordered set),
-        # but the requirement is to sync.
-        all_blocked_ids = api_blocked_ids
-        if not all_blocked_ids:
-             # Fallback to DB if API returned nothing (e.g. error handled inside service?)
-             # But service exits on error. So if we are here, API returned empty list.
-             # We check DB just in case.
-             all_blocked_ids = list(database.get_all_blocked_ids_from_db())
-
-        if not all_blocked_ids:
-            logging.info("No blocked IDs found in database or API. Nothing to do.")
-            return
-
-        logging.info(
-            f"Total blocked IDs tracked: {len(all_blocked_ids)}"
-        )
-
-        completed_ids = database.get_unblocked_ids_from_db()
-        logging.info(
-            f"Loaded {len(completed_ids)} already unblocked IDs from the database."
-        )
-
-        # Filter using list comprehension to preserve order (Newest -> Oldest)
-        ids_to_unblock = [uid for uid in all_blocked_ids if uid not in completed_ids]
+            completed_ids = database.get_unblocked_ids_from_db()
+            logging.info(
+                f"Loaded {len(completed_ids)} already unblocked IDs from the database."
+            )
+            
+            # In fallback mode, we must filter, otherwise we'd loop forever on the DB list.
+            ids_to_unblock = [uid for uid in all_blocked_ids if uid not in completed_ids]
+            total_count = len(all_blocked_ids)
+            already_unblocked_count = len(completed_ids)
 
         if not ids_to_unblock:
             logging.info(
@@ -73,7 +74,7 @@ class UnblockAgent(BaseAgent):
             return
 
         # --- Unblocking Process ---
-        self._unblock_user_ids(ids_to_unblock, len(all_blocked_ids), len(completed_ids))
+        self._unblock_user_ids(ids_to_unblock, total_count, already_unblocked_count)
 
     def _unblock_user_ids(
         self,
