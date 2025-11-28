@@ -128,7 +128,7 @@ def test_get_blocked_user_ids_success(x_service, mock_tweepy_api_v1, caplog):
 
     with caplog.at_level(os.environ.get("LOG_LEVEL", "INFO")):
         blocked_ids = x_service.get_blocked_user_ids()
-        assert blocked_ids == {101, 102, 103}
+        assert blocked_ids == [101, 102, 103]
         assert mock_tweepy_api_v1.get_blocked_ids.call_count == 2
         assert (
             "Finished fetching. Found a total of 3 blocked account IDs." in caplog.text

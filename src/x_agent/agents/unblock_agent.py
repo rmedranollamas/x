@@ -33,21 +33,29 @@ class UnblockAgent(BaseAgent):
         api_blocked_ids = self.x_service.get_blocked_user_ids()
 
         if api_blocked_ids:
-            database.add_blocked_ids_to_db(api_blocked_ids)
+            database.add_blocked_ids_to_db(set(api_blocked_ids))
             logging.info(
                 f"Synced {len(api_blocked_ids)} blocked IDs from API to database."
             )
         else:
             logging.info("No blocked IDs returned from the API.")
 
-        all_blocked_ids = database.get_all_blocked_ids_from_db()
+        # We use the API list as the primary source for the queue to preserve order (newest first).
+        # If the API failed (empty list) but we have DB cache, we might fall back to DB (unordered set),
+        # but the requirement is to sync.
+        all_blocked_ids = api_blocked_ids
+        if not all_blocked_ids:
+             # Fallback to DB if API returned nothing (e.g. error handled inside service?)
+             # But service exits on error. So if we are here, API returned empty list.
+             # We check DB just in case.
+             all_blocked_ids = list(database.get_all_blocked_ids_from_db())
 
         if not all_blocked_ids:
             logging.info("No blocked IDs found in database or API. Nothing to do.")
             return
 
         logging.info(
-            f"Total blocked IDs tracked in database: {len(all_blocked_ids)}"
+            f"Total blocked IDs tracked: {len(all_blocked_ids)}"
         )
 
         completed_ids = database.get_unblocked_ids_from_db()
@@ -55,7 +63,8 @@ class UnblockAgent(BaseAgent):
             f"Loaded {len(completed_ids)} already unblocked IDs from the database."
         )
 
-        ids_to_unblock = all_blocked_ids - completed_ids
+        # Filter using list comprehension to preserve order (Newest -> Oldest)
+        ids_to_unblock = [uid for uid in all_blocked_ids if uid not in completed_ids]
 
         if not ids_to_unblock:
             logging.info(
@@ -68,15 +77,15 @@ class UnblockAgent(BaseAgent):
 
     def _unblock_user_ids(
         self,
-        ids_to_unblock: set[int],
+        ids_to_unblock: list[int],
         total_blocked_count: int,
         already_unblocked_count: int,
     ) -> None:
         """
-        Iterates through a set of user IDs and unblocks each one.
+        Iterates through a list of user IDs and unblocks each one.
 
         Args:
-            ids_to_unblock: A set of user IDs to unblock.
+            ids_to_unblock: A list of user IDs to unblock (ordered).
             total_blocked_count: The total number of users who were blocked.
             already_unblocked_count: The number of users already unblocked.
         """

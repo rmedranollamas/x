@@ -149,15 +149,15 @@ class XService:
         logging.info("Authentication successful for both API v1.1 and v2.")
         return api_v1, client_v2
 
-    def get_blocked_user_ids(self) -> set[int]:
+    def get_blocked_user_ids(self) -> list[int]:
         """
         Fetches the complete list of blocked user IDs from the API.
 
         Returns:
-            A set of integer user IDs.
+            A list of integer user IDs, ordered by most recently blocked.
         """
         logging.info("Fetching blocked account IDs... (This will be fast)")
-        blocked_user_ids = set()
+        blocked_user_ids = []
         cursor = -1
         while True:
             try:
@@ -168,7 +168,7 @@ class XService:
                 next_cursor = raw_response[1][1]
 
                 logging.debug(f"Raw IDs received from API: {ids}")
-                blocked_user_ids.update(ids)
+                blocked_user_ids.extend(ids)
                 logging.info(
                     f"Found {len(blocked_user_ids)} blocked account IDs...",
                     extra={"single_line": True},
