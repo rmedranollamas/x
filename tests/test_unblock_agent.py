@@ -38,12 +38,8 @@ def test_execute_no_blocked_ids_initially(unblock_agent, mock_x_service, mock_db
     # Mock the API to return a list of blocked IDs
     mock_x_service.get_blocked_user_ids.return_value = [1, 2, 3]
 
-    # Mock the unblock calls to simulate success
-    mock_x_service.unblock_user.side_effect = [
-        MagicMock(screen_name="user1"),
-        MagicMock(screen_name="user2"),
-        MagicMock(screen_name="user3"),
-    ]
+    # Mock the unblock calls to simulate success (returning True)
+    mock_x_service.unblock_user.side_effect = [True, True, True]
 
     # --- Act ---
     unblock_agent.execute()
@@ -84,13 +80,7 @@ def test_execute_resumes_unblocking(unblock_agent, mock_x_service, mock_db):
     mock_x_service.get_blocked_user_ids.return_value = [1, 2, 3, 4, 5]
 
     # It should try to unblock ALL 5, even if 1 and 2 are in 'unblocked' DB (re-blocked case)
-    mock_x_service.unblock_user.side_effect = [
-        MagicMock(screen_name="user1"),
-        MagicMock(screen_name="user2"),
-        MagicMock(screen_name="user3"),
-        MagicMock(screen_name="user4"),
-        MagicMock(screen_name="user5"),
-    ]
+    mock_x_service.unblock_user.side_effect = [True, True, True, True, True]
 
     unblock_agent.execute()
 
@@ -107,11 +97,7 @@ def test_execute_handles_not_found_users(unblock_agent, mock_x_service, mock_db)
     # The agent now relies on the API return for the queue order
     mock_x_service.get_blocked_user_ids.return_value = [1, 2, 3]
 
-    mock_x_service.unblock_user.side_effect = [
-        MagicMock(screen_name="user1"),
-        "NOT_FOUND",
-        MagicMock(screen_name="user3"),
-    ]
+    mock_x_service.unblock_user.side_effect = [True, "NOT_FOUND", True]
 
     unblock_agent.execute()
 
@@ -126,11 +112,7 @@ def test_execute_handles_unblock_errors(unblock_agent, mock_x_service, mock_db, 
     # The agent now relies on the API return for the queue order
     mock_x_service.get_blocked_user_ids.return_value = [1, 2, 3]
 
-    mock_x_service.unblock_user.side_effect = [
-        MagicMock(screen_name="user1"),
-        None,  # Simulate a generic error
-        MagicMock(screen_name="user3"),
-    ]
+    mock_x_service.unblock_user.side_effect = [True, None, True]
 
     with caplog.at_level(os.environ.get("LOG_LEVEL", "INFO")):
         unblock_agent.execute()

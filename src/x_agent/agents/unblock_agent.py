@@ -31,8 +31,11 @@ class UnblockAgent(BaseAgent):
         # --- State Loading and Resumption Logic ---
         logging.info("Fetching latest blocked IDs from the API to sync...")
         api_blocked_ids = self.x_service.get_blocked_user_ids()
+        
+        logging.info(f"[DEBUG] API returned {len(api_blocked_ids)} blocked IDs.")
 
         if api_blocked_ids:
+            logging.info("[DEBUG] Entering API sync block. Using API list as queue.")
             database.add_blocked_ids_to_db(set(api_blocked_ids))
             logging.info(
                 f"Synced {len(api_blocked_ids)} blocked IDs from API to database."
@@ -41,7 +44,9 @@ class UnblockAgent(BaseAgent):
             # Any ID returned by the API is currently blocked and must be unblocked.
             # We do NOT filter by 'completed_ids' here because a user might have been
             # unblocked in the past (and marked as such in DB) but is now re-blocked.
-            ids_to_unblock = api_blocked_ids
+            # We sort ASCENDING (oldest accounts first) to prioritize legitimate users
+            # over recent spam bots (high IDs) which are often deleted/suspended.
+            ids_to_unblock = sorted(api_blocked_ids)
             total_count = len(ids_to_unblock)
             # For reporting purposes, we can count how many we *thought* were done
             completed_ids = database.get_unblocked_ids_from_db()
@@ -64,8 +69,12 @@ class UnblockAgent(BaseAgent):
             
             # In fallback mode, we must filter, otherwise we'd loop forever on the DB list.
             ids_to_unblock = [uid for uid in all_blocked_ids if uid not in completed_ids]
+            # Sort ascending here as well for consistency
+            ids_to_unblock.sort()
             total_count = len(all_blocked_ids)
             already_unblocked_count = len(completed_ids)
+        
+        logging.info(f"[DEBUG] Final ids_to_unblock count: {len(ids_to_unblock)}")
 
         if not ids_to_unblock:
             logging.info(
@@ -99,16 +108,16 @@ class UnblockAgent(BaseAgent):
         failed_ids = []
 
         for user_id in ids_to_unblock:
-            user_details = self.x_service.unblock_user(user_id)
+            result = self.x_service.unblock_user(user_id)
 
-            # unblock_user returns a user object on success, "NOT_FOUND" for deleted users,
+            # unblock_user returns True on success, "NOT_FOUND" for deleted users,
             # and None for other errors.
-            if user_details == "NOT_FOUND":
+            if result == "NOT_FOUND":
                 # User not found, so we can consider the "unblocking" task for this ID complete.
                 database.mark_user_as_unblocked_in_db(user_id)
                 continue
 
-            if user_details is None:
+            if result is None:
                 # A non-specific error occurred, which was logged by the service.
                 # We'll add it to the list of failures for this session and not mark it as complete,
                 # allowing it to be retried on the next run.
@@ -118,12 +127,11 @@ class UnblockAgent(BaseAgent):
             session_unblocked_count += 1
             database.mark_user_as_unblocked_in_db(user_id)
 
-            username = f"@{user_details.screen_name}"
             total_unblocked = already_unblocked_count + session_unblocked_count
             remaining = total_blocked_count - total_unblocked
 
             logging.info(
-                f"({total_unblocked}/{total_blocked_count}) Successfully unblocked {username} (ID: {user_id}). Remaining: {remaining}."
+                f"({total_unblocked}/{total_blocked_count}) Successfully unblocked ID: {user_id}. Remaining: {remaining}."
             )
 
         logging.info("--- Unblocking Process Complete! ---")

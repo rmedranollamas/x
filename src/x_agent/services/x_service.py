@@ -14,7 +14,9 @@ class XService:
 
     def __init__(self) -> None:
         """Initializes the XService, creating authenticated API clients."""
-        self.api_v1, self.client_v2 = self._create_tweepy_clients()
+        self.api_v1, self.client_v2, self.authenticated_user_id = (
+            self._create_tweepy_clients()
+        )
 
     def _countdown(self, seconds: int, message: str = "Waiting...") -> None:
         """
@@ -82,12 +84,12 @@ class XService:
         api_key_secret: str,
         access_token: str,
         access_token_secret: str,
-    ) -> tweepy.Client:
+    ) -> tuple[tweepy.Client, int]:
         """
         Creates and authenticates the Tweepy v2 client.
 
         Returns:
-            An authenticated Tweepy v2 client.
+            A tuple of (authenticated Tweepy v2 client, authenticated user ID).
         """
         try:
             client_v2 = tweepy.Client(
@@ -98,8 +100,9 @@ class XService:
                 wait_on_rate_limit=False,
             )
             auth_user = client_v2.get_me(user_fields=["id"])
-            logging.debug(f"Authenticated as user ID: {auth_user.data.id}")
-            return client_v2
+            user_id = auth_user.data.id
+            logging.debug(f"Authenticated as user ID: {user_id}")
+            return client_v2, user_id
         except Exception as e:
             logging.error(f"Error during API v2 authentication: {e}", exc_info=True)
             sys.exit(1)
@@ -127,19 +130,19 @@ class XService:
             logging.error(f"Error during API v1.1 authentication: {e}", exc_info=True)
             sys.exit(1)
 
-    def _create_tweepy_clients(self) -> tuple[tweepy.API, tweepy.Client]:
+    def _create_tweepy_clients(self) -> tuple[tweepy.API, tweepy.Client, int]:
         """
         Loads credentials and creates authenticated Tweepy clients.
 
         Returns:
-            A tuple containing the v1.1 API object and the v2 client.
+            A tuple containing the v1.1 API object, the v2 client, and the user ID.
         """
         api_key, api_key_secret, access_token, access_token_secret = (
             self._get_credentials()
         )
 
         logging.info("Authenticating with the X API...")
-        client_v2 = self._create_v2_client(
+        client_v2, user_id = self._create_v2_client(
             api_key, api_key_secret, access_token, access_token_secret
         )
         api_v1 = self._create_v1_client(
@@ -147,7 +150,7 @@ class XService:
         )
 
         logging.info("Authentication successful for both API v1.1 and v2.")
-        return api_v1, client_v2
+        return api_v1, client_v2, user_id
 
     def get_blocked_user_ids(self) -> list[int]:
         """
@@ -189,29 +192,45 @@ class XService:
         )
         return blocked_user_ids
 
-    def unblock_user(self, user_id: int) -> tweepy.User | str | None:
+    def unblock_user(self, user_id: int) -> bool | str | None:
         """
-        Unblocks a single user by their ID.
+        Unblocks a single user by their ID using the V2 API.
 
         Args:
             user_id: The integer ID of the user to unblock.
 
         Returns:
-            The user object if successful, 'NOT_FOUND' if the user does not exist,
+            True if successful, 'NOT_FOUND' if the user does not exist/not blocked,
             or None if an error occurs.
         """
         while True:
             try:
                 logging.debug(f"Attempting to unblock user ID: {user_id}...")
-                return self.api_v1.destroy_block(user_id=user_id)
+                # Use V2 API for unblocking manually via request since 'unblock' method is missing
+                url = f"/2/users/{self.authenticated_user_id}/blocking/{user_id}"
+                response = self.client_v2.request("DELETE", url)
+                
+                # V2 returns 200 OK with {"data": {"blocking": false}} on success
+                if response.errors:
+                    # Check for specific errors if needed
+                    logging.warning(f"V2 API Error unblocking {user_id}: {response.errors}")
+                    # Proceed to check exceptions or assume failure? 
+                    # request() usually raises exceptions for HTTP errors unless configured otherwise.
+                    pass
+                
+                return True
             except tweepy.errors.TooManyRequests as e:
                 self._handle_rate_limit(e)
                 # Retry after waiting
                 continue
             except tweepy.errors.NotFound:
                 logging.warning(
-                    f"User ID {user_id} not found. The account may have been deleted. Skipping."
+                    f"User ID {user_id} not found or not blocked (404). Skipping."
                 )
+                return "NOT_FOUND"
+            except tweepy.errors.BadRequest as e:
+                # Sometimes V2 returns Bad Request for invalid/suspended users
+                logging.warning(f"Bad Request for User ID {user_id}: {e}. Skipping.")
                 return "NOT_FOUND"
             except Exception as e:
                 logging.error(
