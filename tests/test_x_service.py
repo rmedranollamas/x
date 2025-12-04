@@ -67,6 +67,7 @@ def test_x_service_initialization(x_service, mock_tweepy_client_v2, mock_tweepy_
 
 # ... existing tests for countdown and rate limit ...
 
+
 def test_countdown(x_service, caplog):
     """Test countdown waits and logs message."""
     with patch("time.sleep") as mock_sleep:
@@ -117,31 +118,83 @@ def test_handle_rate_limit_unknown_reset_time(x_service, caplog):
             assert "Rate limit reached, but reset time is unknown." in caplog.text
 
 
-def test_get_blocked_user_ids_success(x_service, mock_tweepy_api_v1, caplog):
-    """Test fetching blocked user IDs successfully."""
-    mock_tweepy_api_v1.get_blocked_ids.side_effect = [
-        ([101, 102], (None, 1)),  # First call, returns some IDs and a next_cursor
-        ([103], (None, 0)),  # Second call, returns more IDs and cursor 0 (end)
-    ]
+def test_get_blocked_user_ids_success_v2(x_service, caplog):
+    """Test fetching blocked user IDs successfully using V2 Paginator."""
 
-    with caplog.at_level(os.environ.get("LOG_LEVEL", "INFO")):
-        blocked_ids = x_service.get_blocked_user_ids()
-        assert blocked_ids == [101, 102, 103]
-        assert mock_tweepy_api_v1.get_blocked_ids.call_count == 2
-        assert (
-            "Finished fetching. Found a total of 3 blocked account IDs." in caplog.text
+    # Mock Response objects with data attribute containing User objects
+    mock_user1 = MagicMock(id=101)
+    mock_user2 = MagicMock(id=102)
+    mock_user3 = MagicMock(id=103)
+
+    response1 = MagicMock()
+    response1.data = [mock_user1, mock_user2]
+
+    response2 = MagicMock()
+    response2.data = [mock_user3]
+
+    response3 = MagicMock()  # Empty/Last response
+    response3.data = []
+
+    # Paginator is instantiated, then iterated over.
+    # We mock the class so that the instance returned is iterable.
+    with patch("src.x_agent.services.x_service.tweepy.Paginator") as MockPaginator:
+        mock_paginator_instance = MockPaginator.return_value
+        # Make the instance iterable yielding our responses
+        mock_paginator_instance.__iter__.return_value = iter(
+            [response1, response2, response3]
         )
 
-
-def test_get_blocked_user_ids_unexpected_error(x_service, mock_tweepy_api_v1, caplog):
-    """Test fetching blocked user IDs handles unexpected errors."""
-    mock_tweepy_api_v1.get_blocked_ids.side_effect = Exception("Network error")
-
-    with pytest.raises(SystemExit) as excinfo:
         with caplog.at_level(os.environ.get("LOG_LEVEL", "INFO")):
-            x_service.get_blocked_user_ids()
-            assert "An unexpected error occurred while fetching" in caplog.text
-    assert excinfo.value.code == 1
+            blocked_ids = x_service.get_blocked_user_ids()
+
+            assert blocked_ids == [101, 102, 103]
+            MockPaginator.assert_called_once_with(
+                x_service.client_v2.get_blocked, max_results=1000, user_auth=True
+            )
+            assert "Found 3 blocked account IDs..." in caplog.text
+            assert (
+                "Finished fetching. Found a total of 3 blocked account IDs."
+                in caplog.text
+            )
+
+
+def test_get_blocked_user_ids_rate_limit_v2(x_service, caplog):
+    """Test V2 fetching handles rate limits via Paginator exception."""
+
+    mock_response = MagicMock()
+    mock_response.headers.get.return_value = str(int(time.time()) + 1)
+    rate_limit_exception = tweepy.errors.TooManyRequests(mock_response)
+
+    with patch("src.x_agent.services.x_service.tweepy.Paginator") as MockPaginator:
+        mock_paginator_instance = MockPaginator.return_value
+        # The iterator raises the exception immediately
+        mock_paginator_instance.__iter__.side_effect = rate_limit_exception
+
+        with patch("time.sleep") as mock_sleep:
+            with caplog.at_level(os.environ.get("LOG_LEVEL", "INFO")):
+                blocked_ids = x_service.get_blocked_user_ids()
+
+                # Should return partial list (empty in this case) and log warning
+                assert blocked_ids == []
+                assert (
+                    "Rate limit hit during fetching. Returning partial list."
+                    in caplog.text
+                )
+                mock_sleep.assert_called()
+
+
+def test_get_blocked_user_ids_unexpected_error_v2(x_service, caplog):
+    """Test V2 fetching handles unexpected errors."""
+
+    with patch("src.x_agent.services.x_service.tweepy.Paginator") as MockPaginator:
+        mock_paginator_instance = MockPaginator.return_value
+        mock_paginator_instance.__iter__.side_effect = Exception("Network error")
+
+        with pytest.raises(SystemExit) as excinfo:
+            with caplog.at_level(os.environ.get("LOG_LEVEL", "INFO")):
+                x_service.get_blocked_user_ids()
+                assert "An unexpected error occurred while fetching" in caplog.text
+        assert excinfo.value.code == 1
 
 
 def test_unblock_user_success(x_service, mock_tweepy_client_v2):
@@ -151,7 +204,9 @@ def test_unblock_user_success(x_service, mock_tweepy_client_v2):
     mock_tweepy_client_v2.request.return_value = mock_response
 
     result = x_service.unblock_user(123)
-    mock_tweepy_client_v2.request.assert_called_once_with("DELETE", "/2/users/12345/blocking/123")
+    mock_tweepy_client_v2.request.assert_called_once_with(
+        "DELETE", "/2/users/12345/blocking/123"
+    )
     assert result is True
 
 
@@ -167,7 +222,7 @@ def test_unblock_user_not_found(x_service, mock_tweepy_client_v2, caplog):
     with caplog.at_level(os.environ.get("LOG_LEVEL", "INFO")):
         result = x_service.unblock_user(123)
         assert result == "NOT_FOUND"
-        assert "User ID 123 not found or not blocked." in caplog.text
+        assert "User ID 123 not found or not blocked (404). Skipping." in caplog.text
 
 
 def test_unblock_user_rate_limit(x_service, mock_tweepy_client_v2, caplog):
@@ -178,7 +233,7 @@ def test_unblock_user_rate_limit(x_service, mock_tweepy_client_v2, caplog):
         "x-rate-limit-reset": str(int(time.time()) + 1)
     }  # 1 second from now
     rate_limit_exception = tweepy.errors.TooManyRequests(mock_response)
-    
+
     mock_success_response = MagicMock()
     mock_success_response.errors = []
 

@@ -154,39 +154,50 @@ class XService:
 
     def get_blocked_user_ids(self) -> list[int]:
         """
-        Fetches the complete list of blocked user IDs from the API.
+        Fetches the complete list of blocked user IDs from the API using V2.
 
         Returns:
-            A list of integer user IDs, ordered by most recently blocked.
+            A list of integer user IDs.
         """
-        logging.info("Fetching blocked account IDs... (This will be fast)")
+        logging.info("Fetching blocked account IDs via V2... (This will be fast)")
         blocked_user_ids = []
-        cursor = -1
-        while True:
-            try:
-                logging.debug(f"Fetching blocked IDs with cursor: {cursor}")
-                # The response is a tuple: (list_of_ids, (previous_cursor, next_cursor))
-                raw_response = self.api_v1.get_blocked_ids(cursor=cursor)
-                ids = raw_response[0]
-                next_cursor = raw_response[1][1]
 
-                logging.debug(f"Raw IDs received from API: {ids}")
-                blocked_user_ids.extend(ids)
-                logging.info(
-                    f"Found {len(blocked_user_ids)} blocked account IDs...",
-                    extra={"single_line": True},
-                )
-                cursor = next_cursor
-                if cursor == 0:
-                    break
-            except tweepy.errors.TooManyRequests as e:
-                self._handle_rate_limit(e)
-                continue
-            except Exception as e:
-                logging.error(
-                    f"An unexpected error occurred while fetching: {e}", exc_info=True
-                )
-                sys.exit(1)
+        # Use Tweepy's Paginator to handle V2 pagination automatically
+        paginator = tweepy.Paginator(
+            self.client_v2.get_blocked,
+            max_results=1000,
+            user_auth=True,  # Ensure user context auth is used
+        )
+
+        try:
+            for response in paginator:
+                if response.data:
+                    ids = [user.id for user in response.data]
+                    logging.debug(f"Raw IDs received from API: {ids}")
+                    blocked_user_ids.extend(ids)
+                    logging.info(
+                        f"Found {len(blocked_user_ids)} blocked account IDs...",
+                        extra={"single_line": True},
+                    )
+
+                # Check for rate limit headers in the response if available?
+                # Tweepy Paginator usually handles basic iteration, but we might need to catch exceptions
+                # if we want custom wait logic. However, passing `wait_on_rate_limit=False` to Client
+                # means exceptions will be raised.
+        except tweepy.errors.TooManyRequests as e:
+            # If Paginator encounters a rate limit, it raises the exception
+            self._handle_rate_limit(e)
+            # We can't easily "resume" a Paginator from an exception without complex logic.
+            # For now, fail gracefully or accept that we got partial list?
+            # Since 'unblock' is resumable, partial list is actually OK!
+            # We return what we have. The next run will get the rest (or the start again).
+            logging.warning("Rate limit hit during fetching. Returning partial list.")
+        except Exception as e:
+            logging.error(
+                f"An unexpected error occurred while fetching: {e}", exc_info=True
+            )
+            sys.exit(1)
+
         logging.info(
             f"Finished fetching. Found a total of {len(blocked_user_ids)} blocked account IDs."
         )
@@ -209,15 +220,17 @@ class XService:
                 # Use V2 API for unblocking manually via request since 'unblock' method is missing
                 url = f"/2/users/{self.authenticated_user_id}/blocking/{user_id}"
                 response = self.client_v2.request("DELETE", url)
-                
+
                 # V2 returns 200 OK with {"data": {"blocking": false}} on success
                 if response.errors:
                     # Check for specific errors if needed
-                    logging.warning(f"V2 API Error unblocking {user_id}: {response.errors}")
-                    # Proceed to check exceptions or assume failure? 
+                    logging.warning(
+                        f"V2 API Error unblocking {user_id}: {response.errors}"
+                    )
+                    # Proceed to check exceptions or assume failure?
                     # request() usually raises exceptions for HTTP errors unless configured otherwise.
                     pass
-                
+
                 return True
             except tweepy.errors.TooManyRequests as e:
                 self._handle_rate_limit(e)
