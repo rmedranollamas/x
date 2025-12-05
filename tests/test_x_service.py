@@ -158,31 +158,6 @@ def test_get_blocked_user_ids_success_v2(x_service, caplog):
             )
 
 
-def test_get_blocked_user_ids_rate_limit_v2(x_service, caplog):
-    """Test V2 fetching handles rate limits via Paginator exception."""
-
-    mock_response = MagicMock()
-    mock_response.headers.get.return_value = str(int(time.time()) + 1)
-    rate_limit_exception = tweepy.errors.TooManyRequests(mock_response)
-
-    with patch("src.x_agent.services.x_service.tweepy.Paginator") as MockPaginator:
-        mock_paginator_instance = MockPaginator.return_value
-        # The iterator raises the exception immediately
-        mock_paginator_instance.__iter__.side_effect = rate_limit_exception
-
-        with patch("time.sleep") as mock_sleep:
-            with caplog.at_level(os.environ.get("LOG_LEVEL", "INFO")):
-                blocked_ids = x_service.get_blocked_user_ids()
-
-                # Should return partial list (empty in this case) and log warning
-                assert blocked_ids == []
-                assert (
-                    "Rate limit hit during fetching. Returning partial list."
-                    in caplog.text
-                )
-                mock_sleep.assert_called()
-
-
 def test_get_blocked_user_ids_unexpected_error_v2(x_service, caplog):
     """Test V2 fetching handles unexpected errors."""
 

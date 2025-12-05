@@ -97,7 +97,7 @@ class XService:
                 consumer_secret=api_key_secret,
                 access_token=access_token,
                 access_token_secret=access_token_secret,
-                wait_on_rate_limit=False,
+                wait_on_rate_limit=True,
             )
             auth_user = client_v2.get_me(user_fields=["id"])
             user_id = auth_user.data.id
@@ -124,7 +124,7 @@ class XService:
             auth = tweepy.OAuth1UserHandler(
                 api_key, api_key_secret, access_token, access_token_secret
             )
-            api_v1 = tweepy.API(auth, wait_on_rate_limit=False)
+            api_v1 = tweepy.API(auth, wait_on_rate_limit=True)
             return api_v1
         except Exception as e:
             logging.error(f"Error during API v1.1 authentication: {e}", exc_info=True)
@@ -162,7 +162,8 @@ class XService:
         logging.info("Fetching blocked account IDs via V2... (This will be fast)")
         blocked_user_ids = []
 
-        # Use Tweepy's Paginator to handle V2 pagination automatically
+        # Use Tweepy's Paginator to handle V2 pagination automatically.
+        # With wait_on_rate_limit=True in Client, this will auto-sleep and resume.
         paginator = tweepy.Paginator(
             self.client_v2.get_blocked,
             max_results=1000,
@@ -179,19 +180,6 @@ class XService:
                         f"Found {len(blocked_user_ids)} blocked account IDs...",
                         extra={"single_line": True},
                     )
-
-                # Check for rate limit headers in the response if available?
-                # Tweepy Paginator usually handles basic iteration, but we might need to catch exceptions
-                # if we want custom wait logic. However, passing `wait_on_rate_limit=False` to Client
-                # means exceptions will be raised.
-        except tweepy.errors.TooManyRequests as e:
-            # If Paginator encounters a rate limit, it raises the exception
-            self._handle_rate_limit(e)
-            # We can't easily "resume" a Paginator from an exception without complex logic.
-            # For now, fail gracefully or accept that we got partial list?
-            # Since 'unblock' is resumable, partial list is actually OK!
-            # We return what we have. The next run will get the rest (or the start again).
-            logging.warning("Rate limit hit during fetching. Returning partial list.")
         except Exception as e:
             logging.error(
                 f"An unexpected error occurred while fetching: {e}", exc_info=True
