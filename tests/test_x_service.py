@@ -205,7 +205,7 @@ def test_unblock_user_success(x_service, mock_tweepy_client_v2):
 
     result = x_service.unblock_user(123)
     mock_tweepy_client_v2.request.assert_called_once_with(
-        "DELETE", "/2/users/12345/blocking/123"
+        "DELETE", "/users/12345/blocking/123"
     )
     assert result is True
 
@@ -216,6 +216,7 @@ def test_unblock_user_not_found(x_service, mock_tweepy_client_v2, caplog):
     mock_response_404.status_code = 404
     mock_response_404.headers = {}
     mock_response_404.text = '{"errors":[{"detail":"User not found"}]}'
+    mock_response_404.url = "https://api.twitter.com/2/users/12345/blocking/123"
     not_found_exception = tweepy.errors.NotFound(mock_response_404)
 
     mock_tweepy_client_v2.request.side_effect = not_found_exception
@@ -224,7 +225,7 @@ def test_unblock_user_not_found(x_service, mock_tweepy_client_v2, caplog):
         result = x_service.unblock_user(123)
         assert result == "NOT_FOUND"
         assert (
-            'User ID 123 not found or not blocked (404). Response: {"errors":[{"detail":"User not found"}]}. Skipping.'
+            'User ID 123 not found or not blocked (404). URL: https://api.twitter.com/2/users/12345/blocking/123. Response: {"errors":[{"detail":"User not found"}]}. Skipping.'
             in caplog.text
         )
 

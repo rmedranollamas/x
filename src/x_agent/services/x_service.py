@@ -217,8 +217,9 @@ class XService:
         while True:
             try:
                 logging.debug(f"Attempting to unblock user ID: {user_id}...")
-                # Use V2 API for unblocking manually via request since 'unblock' method is missing
-                url = f"/2/users/{self.authenticated_user_id}/blocking/{user_id}"
+                # Use V2 API for unblocking manually via request.
+                # Note: Client base URL likely includes '/2', so we use '/users/...'
+                url = f"/users/{self.authenticated_user_id}/blocking/{user_id}"
                 response = self.client_v2.request("DELETE", url)
 
                 # V2 returns 200 OK with {"data": {"blocking": false}} on success
@@ -237,9 +238,10 @@ class XService:
                 # Retry after waiting
                 continue
             except tweepy.errors.NotFound as e:
+                response_url = e.response.url if e.response else "Unknown URL"
                 error_details = e.response.text if e.response else "No response body"
                 logging.warning(
-                    f"User ID {user_id} not found or not blocked (404). Response: {error_details}. Skipping."
+                    f"User ID {user_id} not found or not blocked (404). URL: {response_url}. Response: {error_details}. Skipping."
                 )
                 return "NOT_FOUND"
             except tweepy.errors.BadRequest as e:
