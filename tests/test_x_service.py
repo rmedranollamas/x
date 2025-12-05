@@ -215,6 +215,7 @@ def test_unblock_user_not_found(x_service, mock_tweepy_client_v2, caplog):
     mock_response_404 = MagicMock()
     mock_response_404.status_code = 404
     mock_response_404.headers = {}
+    mock_response_404.text = '{"errors":[{"detail":"User not found"}]}'
     not_found_exception = tweepy.errors.NotFound(mock_response_404)
 
     mock_tweepy_client_v2.request.side_effect = not_found_exception
@@ -222,7 +223,10 @@ def test_unblock_user_not_found(x_service, mock_tweepy_client_v2, caplog):
     with caplog.at_level(os.environ.get("LOG_LEVEL", "INFO")):
         result = x_service.unblock_user(123)
         assert result == "NOT_FOUND"
-        assert "User ID 123 not found or not blocked (404). Skipping." in caplog.text
+        assert (
+            'User ID 123 not found or not blocked (404). Response: {"errors":[{"detail":"User not found"}]}. Skipping.'
+            in caplog.text
+        )
 
 
 def test_unblock_user_rate_limit(x_service, mock_tweepy_client_v2, caplog):

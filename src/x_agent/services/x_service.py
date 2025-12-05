@@ -236,9 +236,10 @@ class XService:
                 self._handle_rate_limit(e)
                 # Retry after waiting
                 continue
-            except tweepy.errors.NotFound:
+            except tweepy.errors.NotFound as e:
+                error_details = e.response.text if e.response else "No response body"
                 logging.warning(
-                    f"User ID {user_id} not found or not blocked (404). Skipping."
+                    f"User ID {user_id} not found or not blocked (404). Response: {error_details}. Skipping."
                 )
                 return "NOT_FOUND"
             except tweepy.errors.BadRequest as e:
