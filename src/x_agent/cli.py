@@ -4,6 +4,7 @@ import argparse
 from .services.x_service import XService
 from .agents.unblock_agent import UnblockAgent
 from .agents.insights_agent import InsightsAgent
+from .agents.blocked_ids_agent import BlockedIdsAgent
 from .logging_setup import setup_logging
 
 
@@ -19,8 +20,8 @@ def main() -> None:
     )
     parser.add_argument(
         "agent",
-        choices=["unblock", "insights"],
-        help="The agent to run. Available: 'unblock', 'insights'.",
+        choices=["unblock", "insights", "blocked-ids"],
+        help="The agent to run. Available: 'unblock', 'insights', 'blocked-ids'.",
     )
     parser.add_argument(
         "--debug", action="store_true", help="Enable debug logging for detailed output."
@@ -35,6 +36,7 @@ def main() -> None:
         AGENTS = {
             "unblock": UnblockAgent,
             "insights": InsightsAgent,
+            "blocked-ids": BlockedIdsAgent,
         }
         agent_class = AGENTS[args.agent]
         agent = agent_class(x_service)
