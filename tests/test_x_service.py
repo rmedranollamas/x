@@ -200,7 +200,7 @@ def test_unblock_user_not_found(x_service, mock_tweepy_client_v2, caplog):
         result = x_service.unblock_user(123)
         assert result == "NOT_FOUND"
         assert (
-            'User ID 123 not found or not blocked (404). URL: https://api.twitter.com/2/users/12345/blocking/123. Response: {"errors":[{"detail":"User not found"}]}. Skipping.'
+            'User ID 123 not found or not blocked (404). URL: https://api.twitter.com/2/users/12345/blocking/123. Access Level: unknown. Response: {"errors":[{"detail":"User not found"}]}. Skipping.'
             in caplog.text
         )
 

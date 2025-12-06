@@ -222,8 +222,23 @@ class XService:
             # We log the actual URL used to debug path construction issues.
             response_url = e.response.url if e.response else "Unknown URL"
             error_details = e.response.text if e.response else "No response body"
+            headers = e.response.headers if e.response else {}
+
+            # Check for permission issues
+            access_level = headers.get("x-access-level", "unknown")
+            if (
+                access_level
+                and str(access_level).lower().startswith("read")
+                and "write" not in str(access_level).lower()
+            ):
+                logging.error(
+                    f"PERMISSIONS ERROR: Your API credentials appear to be Read-Only (x-access-level: {access_level}). "
+                    "You must generate new Access Tokens with 'Read and Write' permissions to unblock users."
+                )
+
             logging.warning(
-                f"User ID {user_id} not found or not blocked (404). URL: {response_url}. Response: {error_details}. Skipping."
+                f"User ID {user_id} not found or not blocked (404). URL: {response_url}. "
+                f"Access Level: {access_level}. Response: {error_details}. Skipping."
             )
             return "NOT_FOUND"
 
