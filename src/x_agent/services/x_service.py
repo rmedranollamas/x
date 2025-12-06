@@ -193,10 +193,7 @@ class XService:
 
     def unblock_user(self, user_id: int) -> bool | str | None:
         """
-        Unblocks a single user by their ID using the V1.1 API.
-
-        Note: We use V1.1 because Tweepy 4.x Client (V2) lacks a built-in unblock method,
-        and manual V2 request construction has proven unreliable.
+        Unblocks a single user by their ID using the V2 API.
 
         Args:
             user_id: The integer ID of the user to unblock.
@@ -207,14 +204,28 @@ class XService:
         """
         try:
             logging.debug(f"Attempting to unblock user ID: {user_id}...")
-            # Use V1.1 API for unblocking as a robust fallback
-            self.api_v1.destroy_block(user_id=user_id)
+            # Use V2 API for unblocking manually via request.
+            # We use a relative path (no leading slash) to append to Client's base URL.
+            # Base URL: https://api.twitter.com/2
+            # Route: users/:id/blocking/:target_id
+            # Result: https://api.twitter.com/2/users/:id/blocking/:target_id
+            url = f"users/{self.authenticated_user_id}/blocking/{user_id}"
+
+            # Note: client.request respects wait_on_rate_limit=True, so it will auto-wait.
+            response = self.client_v2.request("DELETE", url)
+
+            if response.errors:
+                logging.warning(f"V2 API Error unblocking {user_id}: {response.errors}")
+
             return True
 
-        except tweepy.errors.NotFound:
+        except tweepy.errors.NotFound as e:
             # 404 means user not found or not blocked.
+            # We log the actual URL used to debug path construction issues.
+            response_url = e.response.url if e.response else "Unknown URL"
+            error_details = e.response.text if e.response else "No response body"
             logging.warning(
-                f"User ID {user_id} not found or not blocked (404). Skipping."
+                f"User ID {user_id} not found or not blocked (404). URL: {response_url}. Response: {error_details}. Skipping."
             )
             return "NOT_FOUND"
 

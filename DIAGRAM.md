@@ -38,6 +38,41 @@ graph TD
     API_Del -->|Return 200 or 404| Unblock
 ```
 
+## Unblock Logic Flow
+
+The following sequence diagram illustrates the detailed interaction for the Unblock Agent, highlighting the API version usage and state management.
+
+```mermaid
+sequenceDiagram
+    participant CLI
+    participant Agent as UnblockAgent
+    participant Service as XService
+    participant V2 as Twitter API V2
+    participant DB as SQLite
+
+    CLI->>Agent: execute()
+    Agent->>Service: get_blocked_user_ids()
+    Service->>V2: GET /2/users/:id/blocking (Paginator)
+    note right of Service: Auto-paginates & Handles Rate Limits
+    V2-->>Service: List[User] (JSON)
+    Service-->>Agent: List[IDs]
+    Agent->>DB: add_blocked_ids_to_db(IDs)
+    
+    loop For each ID in sorted list
+        Agent->>Service: unblock_user(ID)
+        Service->>V2: DELETE /2/users/:my_id/blocking/:target_id
+        note right of Service: URL: users/:id/blocking/:target (No leading slash)
+        alt Success
+            V2-->>Service: 200 OK
+            Service-->>Agent: True
+            Agent->>DB: mark_user_as_unblocked_in_db(ID)
+        else Failure (404/429)
+            V2-->>Service: Error (Log details)
+            Service-->>Agent: False/None
+        end
+    end
+```
+
 ## Current Issue Deep Dive: The "Ghost Block" Paradox
 
 The current issue involves a discrepancy where the API returns a user as "Blocked" but refuses to "Unblock" them.
@@ -51,11 +86,11 @@ The current issue involves a discrepancy where the API returns a user as "Blocke
 4.  **API Call**: `XService` executes `DELETE /2/users/{me}/blocking/1407714921828306951`.
 5.  **Result**: `404 Not Found`.
 
-### Potential Causes
+### Root Cause Analysis (Resolved)
 
-1.  **Endpoint Specificity**: The `DELETE` endpoint might enforce stricter validation than `GET`. If a user is suspended, `GET` might list them (legacy artifact), but `DELETE` might fail to find the active user object to unblock.
-2.  **ID Mismatch**: While unlikely with integers, if there is any string/int conversion issue in the library, it could cause this. (Verified as unlikely).
-3.  **Authentication Context**: The `DELETE` endpoint acts on behalf of the *authenticated user*. If the `client_v2` was somehow authenticated as a different user (App-only context vs User context), it might fail. However, logs show "Authentication successful".
+The `404 Not Found` errors were caused by incorrect URL construction in the manual V2 request.
+*   **Incorrect:** `/2/users/...` (Double version prefix if base is `/2`) or `/users/...` (Absolute path dropping base).
+*   **Correct:** `users/...` (Relative path appending to base `/2`).
+*   **Code Defect:** An indentation error nested `unblock_user` inside `get_blocked_user_ids`, preventing external calls (detected via tests).
 
-### Next Steps
-We have added detailed logging to capture the **Response Body** of the 404 error. This will reveal the specific API error code (e.g., `User Not Found` vs `Resource Not Found`) to pinpoint the root cause.
+This has been resolved by correcting the URL format and method visibility.
