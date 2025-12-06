@@ -180,7 +180,7 @@ def test_unblock_user_success(x_service, mock_tweepy_client_v2):
 
     result = x_service.unblock_user(123)
     mock_tweepy_client_v2.request.assert_called_once_with(
-        "DELETE", "users/12345/blocking/123"
+        "DELETE", "/2/users/12345/blocking/123"
     )
     assert result is True
 

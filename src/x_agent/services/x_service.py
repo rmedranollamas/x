@@ -205,11 +205,9 @@ class XService:
         try:
             logging.debug(f"Attempting to unblock user ID: {user_id}...")
             # Use V2 API for unblocking manually via request.
-            # We use a relative path (no leading slash) to append to Client's base URL.
-            # Base URL: https://api.twitter.com/2
-            # Route: users/:id/blocking/:target_id
-            # Result: https://api.twitter.com/2/users/:id/blocking/:target_id
-            url = f"users/{self.authenticated_user_id}/blocking/{user_id}"
+            # Client host is 'https://api.twitter.com', so we must provide full path.
+            # Route: /2/users/:id/blocking/:target_id
+            url = f"/2/users/{self.authenticated_user_id}/blocking/{user_id}"
 
             # Note: client.request respects wait_on_rate_limit=True, so it will auto-wait.
             response = self.client_v2.request("DELETE", url)
