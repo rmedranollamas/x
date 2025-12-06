@@ -193,7 +193,10 @@ class XService:
 
     def unblock_user(self, user_id: int) -> bool | str | None:
         """
-        Unblocks a single user by their ID using the V2 API.
+        Unblocks a single user by their ID using the V1.1 API.
+
+        Note: We use V1.1 because Tweepy 4.x Client (V2) lacks a built-in unblock method,
+        and manual V2 request construction has proven unreliable.
 
         Args:
             user_id: The integer ID of the user to unblock.
@@ -202,45 +205,29 @@ class XService:
             True if successful, 'NOT_FOUND' if the user does not exist/not blocked,
             or None if an error occurs.
         """
-        while True:
-            try:
-                logging.debug(f"Attempting to unblock user ID: {user_id}...")
-                # Use V2 API for unblocking manually via request.
-                # Note: Client base URL likely includes '/2', so we use '/users/...'
-                url = f"/users/{self.authenticated_user_id}/blocking/{user_id}"
-                response = self.client_v2.request("DELETE", url)
+        try:
+            logging.debug(f"Attempting to unblock user ID: {user_id}...")
+            # Use V1.1 API for unblocking as a robust fallback
+            self.api_v1.destroy_block(user_id=user_id)
+            return True
 
-                # V2 returns 200 OK with {"data": {"blocking": false}} on success
-                if response.errors:
-                    # Check for specific errors if needed
-                    logging.warning(
-                        f"V2 API Error unblocking {user_id}: {response.errors}"
-                    )
-                    # Proceed to check exceptions or assume failure?
-                    # request() usually raises exceptions for HTTP errors unless configured otherwise.
-                    pass
+        except tweepy.errors.NotFound:
+            # 404 means user not found or not blocked.
+            logging.warning(
+                f"User ID {user_id} not found or not blocked (404). Skipping."
+            )
+            return "NOT_FOUND"
 
-                return True
-            except tweepy.errors.TooManyRequests as e:
-                self._handle_rate_limit(e)
-                # Retry after waiting
-                continue
-            except tweepy.errors.NotFound as e:
-                response_url = e.response.url if e.response else "Unknown URL"
-                error_details = e.response.text if e.response else "No response body"
-                logging.warning(
-                    f"User ID {user_id} not found or not blocked (404). URL: {response_url}. Response: {error_details}. Skipping."
-                )
-                return "NOT_FOUND"
-            except tweepy.errors.BadRequest as e:
-                # Sometimes V2 returns Bad Request for invalid/suspended users
-                logging.warning(f"Bad Request for User ID {user_id}: {e}. Skipping.")
-                return "NOT_FOUND"
-            except Exception as e:
-                logging.error(
-                    f"Could not unblock user ID {user_id}. Reason: {e}", exc_info=True
-                )
-                return None
+        except tweepy.errors.Forbidden as e:
+            # 403 Forbidden can happen if the user is suspended
+            logging.warning(f"Forbidden (403) for User ID {user_id}: {e}. Skipping.")
+            return "NOT_FOUND"
+
+        except Exception as e:
+            logging.error(
+                f"Could not unblock user ID {user_id}. Reason: {e}", exc_info=True
+            )
+            return None
 
     def get_me(self) -> tweepy.User | None:
         """

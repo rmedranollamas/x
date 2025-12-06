@@ -172,68 +172,36 @@ def test_get_blocked_user_ids_unexpected_error_v2(x_service, caplog):
         assert excinfo.value.code == 1
 
 
-def test_unblock_user_success(x_service, mock_tweepy_client_v2):
-    """Test unblocking a user successfully using V2."""
-    mock_response = MagicMock()
-    mock_response.errors = []
-    mock_tweepy_client_v2.request.return_value = mock_response
+def test_unblock_user_success(x_service):
+    """Test unblocking a user successfully using V1.1."""
+    # Setup V1 mock
+    x_service.api_v1.destroy_block.return_value = (
+        MagicMock()
+    )  # Returns User object usually
 
     result = x_service.unblock_user(123)
-    mock_tweepy_client_v2.request.assert_called_once_with(
-        "DELETE", "/users/12345/blocking/123"
-    )
+
+    x_service.api_v1.destroy_block.assert_called_once_with(user_id=123)
     assert result is True
 
 
-def test_unblock_user_not_found(x_service, mock_tweepy_client_v2, caplog):
-    """Test unblocking a user that is not found (V2)."""
+def test_unblock_user_not_found(x_service, caplog):
+    """Test unblocking a user that is not found (V1.1)."""
     mock_response_404 = MagicMock()
     mock_response_404.status_code = 404
-    mock_response_404.headers = {}
-    mock_response_404.text = '{"errors":[{"detail":"User not found"}]}'
-    mock_response_404.url = "https://api.twitter.com/2/users/12345/blocking/123"
     not_found_exception = tweepy.errors.NotFound(mock_response_404)
 
-    mock_tweepy_client_v2.request.side_effect = not_found_exception
+    x_service.api_v1.destroy_block.side_effect = not_found_exception
 
     with caplog.at_level(os.environ.get("LOG_LEVEL", "INFO")):
         result = x_service.unblock_user(123)
         assert result == "NOT_FOUND"
-        assert (
-            'User ID 123 not found or not blocked (404). URL: https://api.twitter.com/2/users/12345/blocking/123. Response: {"errors":[{"detail":"User not found"}]}. Skipping.'
-            in caplog.text
-        )
+        assert "User ID 123 not found or not blocked (404). Skipping." in caplog.text
 
 
-def test_unblock_user_rate_limit(x_service, mock_tweepy_client_v2, caplog):
-    """Test unblocking a user handles rate limits and retries (V2)."""
-    mock_response = MagicMock()
-    mock_response.status_code = 429  # Too Many Requests
-    mock_response.headers = {
-        "x-rate-limit-reset": str(int(time.time()) + 1)
-    }  # 1 second from now
-    rate_limit_exception = tweepy.errors.TooManyRequests(mock_response)
-
-    mock_success_response = MagicMock()
-    mock_success_response.errors = []
-
-    mock_tweepy_client_v2.request.side_effect = [
-        rate_limit_exception,  # First call raises rate limit exception
-        mock_success_response,  # Second call succeeds after wait
-    ]
-
-    with patch("time.sleep") as mock_sleep:
-        with caplog.at_level(os.environ.get("LOG_LEVEL", "INFO")):
-            result = x_service.unblock_user(123)
-            assert result is True
-            assert mock_tweepy_client_v2.request.call_count == 2
-            mock_sleep.assert_called_once()
-            assert "Rate limit reached." in caplog.text
-
-
-def test_unblock_user_generic_error(x_service, mock_tweepy_client_v2, caplog):
-    """Test unblocking a user handles generic errors (V2)."""
-    mock_tweepy_client_v2.request.side_effect = Exception("Generic API error")
+def test_unblock_user_generic_error(x_service, caplog):
+    """Test unblocking a user handles generic errors (V1.1)."""
+    x_service.api_v1.destroy_block.side_effect = Exception("Generic API error")
 
     with caplog.at_level(os.environ.get("LOG_LEVEL", "INFO")):
         result = x_service.unblock_user(123)
