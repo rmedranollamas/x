@@ -175,41 +175,48 @@ def test_get_blocked_user_ids_unexpected_error_v2(x_service, caplog):
 def test_unblock_user_success(x_service, mock_tweepy_client_v2):
     """Test unblocking a user successfully using V2."""
     mock_response = MagicMock()
+    mock_response.status_code = 200
     mock_response.errors = []
-    mock_tweepy_client_v2.request.return_value = mock_response
+
+    # Mock session.delete
+    mock_tweepy_client_v2.session = MagicMock()
+    mock_tweepy_client_v2.session.delete.return_value = mock_response
 
     result = x_service.unblock_user(123)
-    mock_tweepy_client_v2.request.assert_called_once_with(
-        "DELETE", "/2/users/12345/blocking/123"
+    mock_tweepy_client_v2.session.delete.assert_called_once_with(
+        "https://api.twitter.com/2/users/12345/blocking/123"
     )
     assert result is True
 
 
 def test_unblock_user_not_found(x_service, mock_tweepy_client_v2, caplog):
     """Test unblocking a user that is not found (V2)."""
-    mock_response_404 = MagicMock()
-    mock_response_404.status_code = 404
-    mock_response_404.headers = {}
-    mock_response_404.text = '{"errors":[{"detail":"User not found"}]}'
-    mock_response_404.url = "https://api.twitter.com/2/users/12345/blocking/123"
-    not_found_exception = tweepy.errors.NotFound(mock_response_404)
+    mock_response = MagicMock()
+    mock_response.status_code = 404
+    mock_response.headers = {"x-access-level": "read-write"}
+    mock_response.text = '{"errors":[{"detail":"User not found"}]}'
 
-    mock_tweepy_client_v2.request.side_effect = not_found_exception
+    mock_tweepy_client_v2.session = MagicMock()
+    mock_tweepy_client_v2.session.delete.return_value = mock_response
 
     with caplog.at_level(os.environ.get("LOG_LEVEL", "INFO")):
         result = x_service.unblock_user(123)
         assert result == "NOT_FOUND"
+        # Note: URL matches the one constructed in code
         assert (
-            'User ID 123 not found or not blocked (404). URL: https://api.twitter.com/2/users/12345/blocking/123. Access Level: unknown. Response: {"errors":[{"detail":"User not found"}]}. Skipping.'
+            'User ID 123 not found or not blocked (404). URL: https://api.twitter.com/2/users/12345/blocking/123. Access Level: read-write. Response: {"errors":[{"detail":"User not found"}]}. Skipping.'
             in caplog.text
         )
 
 
 def test_unblock_user_generic_error(x_service, mock_tweepy_client_v2, caplog):
     """Test unblocking a user handles generic errors (V2)."""
-    mock_tweepy_client_v2.request.side_effect = Exception("Generic API error")
+    mock_tweepy_client_v2.session = MagicMock()
+    mock_tweepy_client_v2.session.delete.side_effect = Exception("Generic API error")
 
     with caplog.at_level(os.environ.get("LOG_LEVEL", "INFO")):
         result = x_service.unblock_user(123)
         assert result is None
-        assert "Could not unblock user ID 123. Reason: Generic API error" in caplog.text
+        assert (
+            "Could not unblock user ID 123. Exception: Generic API error" in caplog.text
+        )

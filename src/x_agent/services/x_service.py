@@ -193,7 +193,8 @@ class XService:
 
     def unblock_user(self, user_id: int) -> bool | str | None:
         """
-        Unblocks a single user by their ID using the V2 API.
+        Unblocks a single user by their ID using the V2 API via direct session request.
+        This bypasses potential URL construction issues in Tweepy's client.request.
 
         Args:
             user_id: The integer ID of the user to unblock.
@@ -204,52 +205,51 @@ class XService:
         """
         try:
             logging.debug(f"Attempting to unblock user ID: {user_id}...")
-            # Use V2 API for unblocking manually via request.
-            # Client host is 'https://api.twitter.com', so we must provide full path.
-            # Route: /2/users/:id/blocking/:target_id
-            url = f"/2/users/{self.authenticated_user_id}/blocking/{user_id}"
 
-            # Note: client.request respects wait_on_rate_limit=True, so it will auto-wait.
-            response = self.client_v2.request("DELETE", url)
+            # Construct Absolute URL for clarity
+            url = f"https://api.twitter.com/2/users/{self.authenticated_user_id}/blocking/{user_id}"
 
-            if response.errors:
-                logging.warning(f"V2 API Error unblocking {user_id}: {response.errors}")
+            # Use the underlying requests session which has Auth headers
+            response = self.client_v2.session.delete(url)
 
-            return True
+            if 200 <= response.status_code < 300:
+                return True
 
-        except tweepy.errors.NotFound as e:
-            # 404 means user not found or not blocked.
-            # We log the actual URL used to debug path construction issues.
-            response_url = e.response.url if e.response else "Unknown URL"
-            error_details = e.response.text if e.response else "No response body"
-            headers = e.response.headers if e.response else {}
+            if response.status_code == 429:
+                # Manual rate limit handling
+                reset_time = int(response.headers.get("x-rate-limit-reset", 0))
+                wait_seconds = max(0, reset_time - int(time.time()))
+                logging.warning(f"Rate limit hit (429). Waiting {wait_seconds}s.")
+                time.sleep(wait_seconds + 1)  # Add buffer
+                return None
 
-            # Check for permission issues
-            access_level = headers.get("x-access-level", "unknown")
-            if (
-                access_level
-                and str(access_level).lower().startswith("read")
-                and "write" not in str(access_level).lower()
-            ):
-                logging.error(
-                    f"PERMISSIONS ERROR: Your API credentials appear to be Read-Only (x-access-level: {access_level}). "
-                    "You must generate new Access Tokens with 'Read and Write' permissions to unblock users."
+            if response.status_code == 404:
+                # User not found or not blocked
+                logging.warning(
+                    f"User ID {user_id} not found or not blocked (404). "
+                    f"URL: {url}. "
+                    f"Access Level: {response.headers.get('x-access-level', 'unknown')}. "
+                    f"Response: {response.text}. Skipping."
                 )
+                return "NOT_FOUND"
 
-            logging.warning(
-                f"User ID {user_id} not found or not blocked (404). URL: {response_url}. "
-                f"Access Level: {access_level}. Response: {error_details}. Skipping."
+            if response.status_code == 403:
+                logging.warning(
+                    f"Forbidden (403) for User ID {user_id}. "
+                    f"Headers: {response.headers}. Body: {response.text}. Skipping."
+                )
+                return "NOT_FOUND"
+
+            # Other errors
+            logging.error(
+                f"Error unblocking {user_id}: Status {response.status_code}. "
+                f"Body: {response.text}"
             )
-            return "NOT_FOUND"
-
-        except tweepy.errors.Forbidden as e:
-            # 403 Forbidden can happen if the user is suspended
-            logging.warning(f"Forbidden (403) for User ID {user_id}: {e}. Skipping.")
-            return "NOT_FOUND"
+            return None
 
         except Exception as e:
             logging.error(
-                f"Could not unblock user ID {user_id}. Reason: {e}", exc_info=True
+                f"Could not unblock user ID {user_id}. Exception: {e}", exc_info=True
             )
             return None
 
