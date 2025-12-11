@@ -193,8 +193,9 @@ class XService:
 
     def unblock_user(self, user_id: int) -> bool | str | None:
         """
-        Unblocks a single user by their ID using the V2 API via direct session request.
-        This bypasses potential URL construction issues in Tweepy's client.request.
+        Unblocks a single user by their ID using the V1.1 API via direct session POST.
+        We use V1.1 POST because V2 DELETE is returning HTML 404s (Route Not Found) for valid URLs,
+        suggesting a routing/tier issue. V1.1 is robust and uses POST.
 
         Args:
             user_id: The integer ID of the user to unblock.
@@ -206,11 +207,12 @@ class XService:
         try:
             logging.debug(f"Attempting to unblock user ID: {user_id}...")
 
-            # Construct Absolute URL for clarity
-            url = f"https://api.twitter.com/2/users/{self.authenticated_user_id}/blocking/{user_id}"
+            # Use V1.1 API (POST) manually via session to ensure correct execution.
+            url = "https://api.twitter.com/1.1/blocks/destroy.json"
 
             # Use the underlying requests session which has Auth headers
-            response = self.client_v2.session.delete(url)
+            # Note: client_v2.session works for V1.1 URLs too if using OAuth1
+            response = self.client_v2.session.post(url, params={"user_id": user_id})
 
             if 200 <= response.status_code < 300:
                 return True
@@ -227,7 +229,7 @@ class XService:
                 # User not found or not blocked
                 logging.warning(
                     f"User ID {user_id} not found or not blocked (404). "
-                    f"URL: {url}. "
+                    f"URL: {response.url}. "
                     f"Access Level: {response.headers.get('x-access-level', 'unknown')}. "
                     f"Response: {response.text}. Skipping."
                 )

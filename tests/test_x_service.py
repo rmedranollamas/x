@@ -152,35 +152,47 @@ def test_get_blocked_user_ids_unexpected_error_v2(x_service, caplog):
         assert excinfo.value.code == 1
 
 
-def test_unblock_user_success(x_service):
-    """Test unblocking a user successfully using V1.1."""
-    # Replace client with local mock
+def test_unblock_user_success():
+    """Test unblocking a user successfully using V1.1 (Manual Setup)."""
+    with patch(
+        "src.x_agent.services.x_service.XService._create_tweepy_clients",
+        return_value=(MagicMock(), MagicMock(), 12345),
+    ):
+        service = XService()
+
     mock_client = MagicMock()
     mock_session = MagicMock()
     mock_client.session = mock_session
-    x_service.client_v2 = mock_client
+    service.client_v2 = mock_client
+    service.authenticated_user_id = 12345
 
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.errors = []
 
-    mock_session.delete.return_value = mock_response
+    mock_session.post.return_value = mock_response
 
-    result = x_service.unblock_user(123)
+    result = service.unblock_user(123)
 
-    mock_session.delete.assert_called_once_with(
-        "https://api.twitter.com/2/users/12345/blocking/123"
+    mock_session.post.assert_called_once_with(
+        "https://api.twitter.com/1.1/blocks/destroy.json", params={"user_id": 123}
     )
     assert result is True
 
 
-def test_unblock_user_not_found(x_service, caplog):
-    """Test unblocking a user that is not found (V1.1)."""
-    # Replace client with local mock
+def test_unblock_user_not_found(caplog):
+    """Test unblocking a user that is not found (V1.1) (Manual Setup)."""
+    with patch(
+        "src.x_agent.services.x_service.XService._create_tweepy_clients",
+        return_value=(MagicMock(), MagicMock(), 12345),
+    ):
+        service = XService()
+
     mock_client = MagicMock()
     mock_session = MagicMock()
     mock_client.session = mock_session
-    x_service.client_v2 = mock_client
+    service.client_v2 = mock_client
+    service.authenticated_user_id = 12345
 
     mock_response = MagicMock()
     mock_response.status_code = 404
@@ -188,31 +200,37 @@ def test_unblock_user_not_found(x_service, caplog):
     mock_response.text = (
         '{"errors":[{"code":34,"message":"Sorry, that page does not exist."}]}'
     )
-    mock_response.url = "https://api.twitter.com/2/users/12345/blocking/123"
+    mock_response.url = "https://api.twitter.com/1.1/blocks/destroy.json?user_id=123"
 
-    mock_session.delete.return_value = mock_response
+    mock_session.post.return_value = mock_response
 
     with caplog.at_level(os.environ.get("LOG_LEVEL", "INFO")):
-        result = x_service.unblock_user(123)
+        result = service.unblock_user(123)
         assert result == "NOT_FOUND"
         assert (
-            'User ID 123 not found or not blocked (404). URL: https://api.twitter.com/2/users/12345/blocking/123. Access Level: read-write. Response: {"errors":[{"code":34,"message":"Sorry, that page does not exist."}]}. Skipping.'
+            'User ID 123 not found or not blocked (404). URL: https://api.twitter.com/1.1/blocks/destroy.json?user_id=123. Access Level: read-write. Response: {"errors":[{"code":34,"message":"Sorry, that page does not exist."}]}. Skipping.'
             in caplog.text
         )
 
 
-def test_unblock_user_generic_error(x_service, caplog):
-    """Test unblocking a user handles generic errors (V1.1)."""
-    # Replace client with local mock
+def test_unblock_user_generic_error(caplog):
+    """Test unblocking a user handles generic errors (V1.1) (Manual Setup)."""
+    with patch(
+        "src.x_agent.services.x_service.XService._create_tweepy_clients",
+        return_value=(MagicMock(), MagicMock(), 12345),
+    ):
+        service = XService()
+
     mock_client = MagicMock()
     mock_session = MagicMock()
     mock_client.session = mock_session
-    x_service.client_v2 = mock_client
+    service.client_v2 = mock_client
+    service.authenticated_user_id = 12345
 
-    mock_session.delete.side_effect = Exception("Generic API error")
+    mock_session.post.side_effect = Exception("Generic API error")
 
     with caplog.at_level(os.environ.get("LOG_LEVEL", "INFO")):
-        result = x_service.unblock_user(123)
+        result = service.unblock_user(123)
         assert result is None
         assert (
             "Could not unblock user ID 123. Exception: Generic API error" in caplog.text
