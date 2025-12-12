@@ -40,30 +40,15 @@ class UnblockAgent(BaseAgent):
             logging.info(
                 f"Synced {len(api_blocked_ids)} blocked IDs from API to database."
             )
-
-            # Load completed IDs to check for duplicates/ghosts
+            # If we have fresh data from the API, trust it 100%.
+            # Any ID returned by the API is currently blocked and must be unblocked.
+            # We do NOT filter by 'completed_ids' here because a user might have been
+            # unblocked in the past (and marked as such in DB) but is now re-blocked.
+            ids_to_unblock = sorted(api_blocked_ids)
+            total_count = len(ids_to_unblock)
+            # For reporting purposes, we can count how many we *thought* were done
             completed_ids = database.get_unblocked_ids_from_db()
             already_unblocked_count = len(completed_ids)
-
-            # Filter out IDs that are already marked as unblocked in our local DB.
-            # This prevents infinite loops on "Ghost Blocks" (IDs that Twitter returns as blocked
-            # but return 404 when we try to unblock them).
-            # If a user WAS manually re-blocked and needs unblocking, the local DB
-            # must be cleared or the specific ID removed from it.
-            ids_to_unblock = [
-                uid for uid in api_blocked_ids if uid not in completed_ids
-            ]
-            ids_to_unblock.sort()
-
-            skipped_count = len(api_blocked_ids) - len(ids_to_unblock)
-            if skipped_count > 0:
-                logging.info(
-                    f"Skipping {skipped_count} IDs that are already marked as unblocked locally (Ghost Blocks protection)."
-                )
-
-            total_count = (
-                len(ids_to_unblock) + already_unblocked_count
-            )  # Approximate total
 
         else:
             logging.info("No blocked IDs returned from the API.")

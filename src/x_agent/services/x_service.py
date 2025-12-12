@@ -154,28 +154,26 @@ class XService:
 
     def get_blocked_user_ids(self) -> list[int]:
         """
-        Fetches the complete list of blocked user IDs from the API using V2.
+        Fetches the complete list of blocked user IDs from the API using V1.1.
+        We switched to V1.1 because V2 was returning 'Ghost' IDs that return 404 on unblock.
+        Matching the List source (V1.1) with the Unblock source (V1.1) reduces inconsistency.
 
         Returns:
             A list of integer user IDs.
         """
-        logging.info("Fetching blocked account IDs via V2... (This will be fast)")
+        logging.info(
+            "Fetching blocked account IDs via V1.1... (This aligns with V1.1 unblock)"
+        )
         blocked_user_ids = []
 
-        # Use Tweepy's Paginator to handle V2 pagination automatically.
-        # With wait_on_rate_limit=True in Client, this will auto-sleep and resume.
-        paginator = tweepy.Paginator(
-            self.client_v2.get_blocked,
-            max_results=1000,
-            user_auth=True,  # Ensure user context auth is used
-        )
-
         try:
-            for response in paginator:
-                if response.data:
-                    ids = [user.id for user in response.data]
-                    logging.debug(f"Raw IDs received from API: {ids}")
-                    blocked_user_ids.extend(ids)
+            # Use Tweepy's Cursor to handle V1.1 pagination automatically.
+            # self.api_v1 is configured with wait_on_rate_limit=True
+            for page in tweepy.Cursor(self.api_v1.get_blocked_ids).pages():
+                # page is a list of integer IDs in V1.1 get_blocked_ids
+                if page:
+                    logging.debug(f"Raw IDs received from API V1.1: {page}")
+                    blocked_user_ids.extend(page)
                     logging.info(
                         f"Found {len(blocked_user_ids)} blocked account IDs...",
                         extra={"single_line": True},

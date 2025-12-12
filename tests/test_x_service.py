@@ -108,30 +108,22 @@ def test_handle_rate_limit_unknown_reset_time(x_service, caplog):
             assert "Rate limit reached, but reset time is unknown." in caplog.text
 
 
-def test_get_blocked_user_ids_success_v2(x_service, caplog):
-    """Test fetching blocked user IDs successfully using V2 Paginator."""
-    mock_user1 = MagicMock(id=101)
-    mock_user2 = MagicMock(id=102)
-    mock_user3 = MagicMock(id=103)
-    response1 = MagicMock()
-    response1.data = [mock_user1, mock_user2]
-    response2 = MagicMock()
-    response2.data = [mock_user3]
-    response3 = MagicMock()
-    response3.data = []
+def test_get_blocked_user_ids_success_v1(x_service, caplog):
+    """Test fetching blocked user IDs successfully using V1.1 Cursor."""
+    # V1.1 get_blocked_ids returns a cursor of IDs (integers)
+    # Cursor().pages() yields lists of IDs
+    page1 = [101, 102]
+    page2 = [103]
+    page3 = []
 
-    with patch("src.x_agent.services.x_service.tweepy.Paginator") as MockPaginator:
-        mock_paginator_instance = MockPaginator.return_value
-        mock_paginator_instance.__iter__.return_value = iter(
-            [response1, response2, response3]
-        )
+    with patch("src.x_agent.services.x_service.tweepy.Cursor") as MockCursor:
+        mock_cursor_instance = MockCursor.return_value
+        mock_cursor_instance.pages.return_value = [page1, page2, page3]
 
         with caplog.at_level(os.environ.get("LOG_LEVEL", "INFO")):
             blocked_ids = x_service.get_blocked_user_ids()
             assert blocked_ids == [101, 102, 103]
-            MockPaginator.assert_called_once_with(
-                x_service.client_v2.get_blocked, max_results=1000, user_auth=True
-            )
+            MockCursor.assert_called_once_with(x_service.api_v1.get_blocked_ids)
             assert "Found 3 blocked account IDs..." in caplog.text
             assert (
                 "Finished fetching. Found a total of 3 blocked account IDs."
@@ -139,11 +131,11 @@ def test_get_blocked_user_ids_success_v2(x_service, caplog):
             )
 
 
-def test_get_blocked_user_ids_unexpected_error_v2(x_service, caplog):
-    """Test V2 fetching handles unexpected errors."""
-    with patch("src.x_agent.services.x_service.tweepy.Paginator") as MockPaginator:
-        mock_paginator_instance = MockPaginator.return_value
-        mock_paginator_instance.__iter__.side_effect = Exception("Network error")
+def test_get_blocked_user_ids_unexpected_error_v1(x_service, caplog):
+    """Test V1.1 fetching handles unexpected errors."""
+    with patch("src.x_agent.services.x_service.tweepy.Cursor") as MockCursor:
+        mock_cursor_instance = MockCursor.return_value
+        mock_cursor_instance.pages.side_effect = Exception("Network error")
 
         with pytest.raises(SystemExit) as excinfo:
             with caplog.at_level(os.environ.get("LOG_LEVEL", "INFO")):
