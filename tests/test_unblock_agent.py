@@ -71,23 +71,28 @@ def test_execute_all_unblocked_from_start(unblock_agent, mock_x_service, mock_db
     mock_x_service.get_blocked_user_ids.assert_called_once()
     mock_x_service.unblock_user.assert_not_called()
 
+    def test_execute_resumes_unblocking(unblock_agent, mock_x_service, mock_db):
+        """Test execute resumes unblocking, skipping locally completed IDs (Ghost protection)."""
+        mock_db.get_all_blocked_ids_from_db.return_value = {1, 2, 3, 4, 5}
+        mock_db.get_unblocked_ids_from_db.return_value = {1, 2}
+        # The API returns all 5 (including ghosts 1 and 2)
+        mock_x_service.get_blocked_user_ids.return_value = [1, 2, 3, 4, 5]
 
-def test_execute_resumes_unblocking(unblock_agent, mock_x_service, mock_db):
-    """Test execute attempts to unblock all users returned by API, ignoring stale local state."""
-    mock_db.get_all_blocked_ids_from_db.return_value = {1, 2, 3, 4, 5}
-    mock_db.get_unblocked_ids_from_db.return_value = {1, 2}
-    # The agent now relies on the API return for the queue order
-    mock_x_service.get_blocked_user_ids.return_value = [1, 2, 3, 4, 5]
+        # It should ONLY try to unblock 3, 4, 5.
+        # 1 and 2 are skipped because they are in the DB.
+        mock_x_service.unblock_user.side_effect = [True, True, True]
 
-    # It should try to unblock ALL 5, even if 1 and 2 are in 'unblocked' DB (re-blocked case)
-    mock_x_service.unblock_user.side_effect = [True, True, True, True, True]
+        unblock_agent.execute()
 
-    unblock_agent.execute()
+        # Verify calls
+        assert mock_x_service.unblock_user.call_count == 3
+        mock_x_service.unblock_user.assert_has_calls([call(3), call(4), call(5)])
 
-    # API should be checked for updates
-    mock_x_service.get_blocked_user_ids.assert_called_once()
-    assert mock_x_service.unblock_user.call_count == 5
-    assert mock_db.mark_user_as_unblocked_in_db.call_count == 5
+        # Verify 1 and 2 were NOT called
+        call_args_list = mock_x_service.unblock_user.call_args_list
+        args = [c[0][0] for c in call_args_list]
+        assert 1 not in args
+        assert 2 not in args
 
 
 def test_execute_handles_not_found_users(unblock_agent, mock_x_service, mock_db):

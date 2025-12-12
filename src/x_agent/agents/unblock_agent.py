@@ -31,7 +31,7 @@ class UnblockAgent(BaseAgent):
         # --- State Loading and Resumption Logic ---
         logging.info("Fetching latest blocked IDs from the API to sync...")
         api_blocked_ids = self.x_service.get_blocked_user_ids()
-        
+
         logging.info(f"[DEBUG] API returned {len(api_blocked_ids)} blocked IDs.")
 
         if api_blocked_ids:
@@ -40,24 +40,37 @@ class UnblockAgent(BaseAgent):
             logging.info(
                 f"Synced {len(api_blocked_ids)} blocked IDs from API to database."
             )
-            # If we have fresh data from the API, trust it 100%.
-            # Any ID returned by the API is currently blocked and must be unblocked.
-            # We do NOT filter by 'completed_ids' here because a user might have been
-            # unblocked in the past (and marked as such in DB) but is now re-blocked.
-            # We sort ASCENDING (oldest accounts first) to prioritize legitimate users
-            # over recent spam bots (high IDs) which are often deleted/suspended.
-            ids_to_unblock = sorted(api_blocked_ids)
-            total_count = len(ids_to_unblock)
-            # For reporting purposes, we can count how many we *thought* were done
+
+            # Load completed IDs to check for duplicates/ghosts
             completed_ids = database.get_unblocked_ids_from_db()
             already_unblocked_count = len(completed_ids)
+
+            # Filter out IDs that are already marked as unblocked in our local DB.
+            # This prevents infinite loops on "Ghost Blocks" (IDs that Twitter returns as blocked
+            # but return 404 when we try to unblock them).
+            # If a user WAS manually re-blocked and needs unblocking, the local DB
+            # must be cleared or the specific ID removed from it.
+            ids_to_unblock = [
+                uid for uid in api_blocked_ids if uid not in completed_ids
+            ]
+            ids_to_unblock.sort()
+
+            skipped_count = len(api_blocked_ids) - len(ids_to_unblock)
+            if skipped_count > 0:
+                logging.info(
+                    f"Skipping {skipped_count} IDs that are already marked as unblocked locally (Ghost Blocks protection)."
+                )
+
+            total_count = (
+                len(ids_to_unblock) + already_unblocked_count
+            )  # Approximate total
 
         else:
             logging.info("No blocked IDs returned from the API.")
             # Fallback to DB if API returned nothing (and didn't crash).
             # This path is rare given XService implementation but good for safety.
             all_blocked_ids = list(database.get_all_blocked_ids_from_db())
-            
+
             if not all_blocked_ids:
                 logging.info("No blocked IDs found in database or API. Nothing to do.")
                 return
@@ -66,14 +79,16 @@ class UnblockAgent(BaseAgent):
             logging.info(
                 f"Loaded {len(completed_ids)} already unblocked IDs from the database."
             )
-            
+
             # In fallback mode, we must filter, otherwise we'd loop forever on the DB list.
-            ids_to_unblock = [uid for uid in all_blocked_ids if uid not in completed_ids]
+            ids_to_unblock = [
+                uid for uid in all_blocked_ids if uid not in completed_ids
+            ]
             # Sort ascending here as well for consistency
             ids_to_unblock.sort()
             total_count = len(all_blocked_ids)
             already_unblocked_count = len(completed_ids)
-        
+
         logging.info(f"[DEBUG] Final ids_to_unblock count: {len(ids_to_unblock)}")
 
         if not ids_to_unblock:
