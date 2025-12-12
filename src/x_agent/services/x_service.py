@@ -191,60 +191,37 @@ class XService:
 
     def unblock_user(self, user_id: int) -> bool | str | None:
         """
-        Unblocks a single user by their ID using the V1.1 API via direct session POST.
-        We use V1.1 POST because V2 DELETE is returning HTML 404s (Route Not Found) for valid URLs,
-        suggesting a routing/tier issue. V1.1 is robust and uses POST.
+        Unblocks a single user by their ID using the V1.1 API (via Tweepy).
 
         Args:
             user_id: The integer ID of the user to unblock.
 
         Returns:
-            True if successful, 'NOT_FOUND' if the user does not exist/not blocked,
-            or None if an error occurs.
+            True if successful, 'NOT_FOUND' if the user does not exist/not blocked (Ghost),
+            or None if an error occurs (e.g. Rate Limit, Network).
         """
         try:
             logging.debug(f"Attempting to unblock user ID: {user_id}...")
+            self.api_v1.destroy_block(user_id=user_id)
+            return True
 
-            # Use V1.1 API (POST) manually via session to ensure correct execution.
-            url = "https://api.twitter.com/1.1/blocks/destroy.json"
-
-            # Use the underlying requests session which has Auth headers
-            # Note: client_v2.session works for V1.1 URLs too if using OAuth1
-            response = self.client_v2.session.post(url, params={"user_id": user_id})
-
-            if 200 <= response.status_code < 300:
-                return True
-
-            if response.status_code == 429:
-                # Manual rate limit handling
-                reset_time = int(response.headers.get("x-rate-limit-reset", 0))
-                wait_seconds = max(0, reset_time - int(time.time()))
-                logging.warning(f"Rate limit hit (429). Waiting {wait_seconds}s.")
-                time.sleep(wait_seconds + 1)  # Add buffer
-                return None
-
-            if response.status_code == 404:
-                # User not found or not blocked
-                logging.warning(
-                    f"User ID {user_id} not found or not blocked (404). "
-                    f"URL: {response.url}. "
-                    f"Access Level: {response.headers.get('x-access-level', 'unknown')}. "
-                    f"Response: {response.text}. Skipping."
-                )
-                return "NOT_FOUND"
-
-            if response.status_code == 403:
-                logging.warning(
-                    f"Forbidden (403) for User ID {user_id}. "
-                    f"Headers: {response.headers}. Body: {response.text}. Skipping."
-                )
-                return "NOT_FOUND"
-
-            # Other errors
-            logging.error(
-                f"Error unblocking {user_id}: Status {response.status_code}. "
-                f"Body: {response.text}"
+        except tweepy.errors.NotFound as e:
+            # User not found (404) - Ghost Block
+            logging.warning(
+                f"User ID {user_id} not found (404). API says: {e}. Skipping (Ghost Block)."
             )
+            return "NOT_FOUND"
+
+        except tweepy.errors.Forbidden as e:
+            # Forbidden (403) - Suspended or otherwise inaccessible
+            logging.warning(
+                f"Forbidden (403) for User ID {user_id}. API says: {e}. Skipping."
+            )
+            return "NOT_FOUND"
+
+        except tweepy.errors.TooManyRequests as e:
+            # Rate Limit (429)
+            self._handle_rate_limit(e)
             return None
 
         except Exception as e:
