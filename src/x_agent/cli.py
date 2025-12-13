@@ -24,6 +24,11 @@ def main() -> None:
         help="The agent to run. Available: 'unblock', 'insights', 'blocked-ids'.",
     )
     parser.add_argument(
+        "--user-id",
+        type=int,
+        help="Optional: Specify a single user ID for the 'unblock' agent.",
+    )
+    parser.add_argument(
         "--debug", action="store_true", help="Enable debug logging for detailed output."
     )
     args = parser.parse_args()
@@ -39,7 +44,11 @@ def main() -> None:
             "blocked-ids": BlockedIdsAgent,
         }
         agent_class = AGENTS[args.agent]
-        agent = agent_class(x_service)
+
+        if args.agent == "unblock" and args.user_id is not None:
+            agent = agent_class(x_service, user_id=args.user_id)
+        else:
+            agent = agent_class(x_service)
         agent.execute()
 
     except Exception as e:

@@ -9,14 +9,19 @@ class UnblockAgent(BaseAgent):
     An agent responsible for unblocking all blocked users on an X account.
     """
 
-    def __init__(self, x_service: XService) -> None:
+    def __init__(self, x_service: XService, user_id: int | None = None) -> None:
         """
         Initializes the agent with a service to interact with the X API.
 
         Args:
             x_service: An instance of XService.
+            user_id: Optional. A specific user ID to unblock.
         """
         self.x_service = x_service
+        self.user_id = user_id
+
+        if self.user_id is not None and not isinstance(self.user_id, int):
+            raise TypeError("User ID must be an integer")
 
     def execute(self) -> None:
         """
@@ -25,6 +30,18 @@ class UnblockAgent(BaseAgent):
         Fetches the list of blocked users, compares it with already unblocked
         users, and unblocks the remaining accounts.
         """
+        # If a specific user_id is provided, override the default behavior
+        if self.user_id is not None:
+            logging.info(f"Attempting to unblock specific user ID: {self.user_id}")
+            ids_to_unblock = [self.user_id]
+            total_blocked_count = 1  # Only one user to unblock
+            already_unblocked_count = 0  # Assume not unblocked for this specific case
+            self._unblock_user_ids(
+                ids_to_unblock, total_blocked_count, already_unblocked_count
+            )
+            return
+
+        # Original logic for unblocking all users
         logging.info("--- X Unblock Agent ---")
         database.initialize_database()
 

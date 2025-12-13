@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 from src.x_agent.agents.insights_agent import InsightsAgent
 from src.x_agent.services.x_service import XService
 
