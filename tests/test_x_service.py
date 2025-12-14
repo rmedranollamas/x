@@ -158,12 +158,15 @@ def test_unblock_user_success(x_service):
 
 
 def test_unblock_user_not_found(x_service, caplog):
-    """Test unblocking a user that is not found (V1.1 Tweepy)."""
+    """Test unblocking a user that is truly not found (Ghost Block)."""
     # Arrange
-    # Simulate 404 Not Found from Tweepy
+    # Simulate 404 Not Found from Tweepy on unblock
     mock_response = MagicMock()
     mock_response.status_code = 404
     x_service.api_v1.destroy_block.side_effect = tweepy.errors.NotFound(mock_response)
+    
+    # Simulate 404 from get_user (Confirming user is missing)
+    x_service.api_v1.get_user.side_effect = tweepy.errors.NotFound(mock_response)
 
     # Act
     with caplog.at_level(os.environ.get("LOG_LEVEL", "INFO")):
@@ -171,8 +174,39 @@ def test_unblock_user_not_found(x_service, caplog):
 
     # Assert
     assert result == "NOT_FOUND"
-    assert "User ID 123 not found (404). API says:" in caplog.text
+    assert "User ID 123 not found (404) on V1" in caplog.text
+    assert "confirmed missing" in caplog.text
     assert "Skipping (Ghost Block)." in caplog.text
+
+
+def test_unblock_user_zombie_block(x_service, caplog):
+    """Test unblocking a 'Zombie' user (Active but V1 unblock fails)."""
+    # Arrange
+    mock_response_404 = MagicMock()
+    mock_response_404.status_code = 404
+    
+    # 1. V1 Unblock fails with 404
+    x_service.api_v1.destroy_block.side_effect = tweepy.errors.NotFound(mock_response_404)
+    
+    # 2. V1 get_user succeeds (User exists)
+    x_service.api_v1.get_user.return_value = MagicMock(id=123)
+    
+    # 3. V2 Unblock raw request setup
+    # x_service uses client_v2.request.
+    # We mock it to return success or raise error.
+    # Let's assume it succeeds.
+    x_service.client_v2.request.return_value = MagicMock()
+
+    # Act
+    with caplog.at_level(os.environ.get("LOG_LEVEL", "INFO")):
+        result = x_service.unblock_user(123)
+
+    # Assert
+    assert result is True
+    assert "User ID 123 not found (404) on V1" in caplog.text
+    assert "User ID 123 EXISTS. Attempting V2 Unblock" in caplog.text
+    assert "V2 Unblock raw request successful" in caplog.text
+    x_service.client_v2.request.assert_called_once()
 
 
 def test_unblock_user_generic_error(x_service, caplog):

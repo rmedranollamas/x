@@ -152,6 +152,22 @@ class XService:
         logging.info("Authentication successful for both API v1.1 and v2.")
         return api_v1, client_v2, user_id
 
+    def _check_user_exists_v1(self, user_id: int) -> bool:
+        """
+        Verifies if a user actually exists using V1.1 API.
+        Used to distinguish between 'Ghost Blocks' (User deleted) and 'Zombie Blocks' (User active but V1 unblock fails).
+        """
+        try:
+            self.api_v1.get_user(user_id=user_id)
+            return True
+        except tweepy.errors.NotFound:
+            return False
+        except Exception as e:
+            logging.warning(f"Error checking existence of user {user_id}: {e}")
+            # Assume exists to be safe and retry? Or assume not?
+            # If we can't verify, we shouldn't mark as Ghost (forever skip).
+            return True
+
     def get_blocked_user_ids(self) -> list[int]:
         """
         Fetches the complete list of blocked user IDs from the API using V1.1.
@@ -189,9 +205,30 @@ class XService:
         )
         return blocked_user_ids
 
+    def _unblock_user_v2(self, target_user_id: int) -> bool:
+        """
+        Attempts to unblock a user using the V2 API via a raw request.
+        This is necessary because the Tweepy client method might be missing or named inconsistently.
+        """
+        try:
+            url = f"/2/users/{self.authenticated_user_id}/blocking/{target_user_id}"
+            response = self.client_v2.request(method="DELETE", route=url)
+            logging.debug(f"V2 Unblock response: {response}")
+            
+            # response is a Response object or similar. 
+            # Tweepy V2 request returns a Response named tuple (data, includes, errors, meta).
+            # If request fails, it usually raises an exception (TweepyException or HTTP exception).
+            # If we are here, it likely succeeded.
+            logging.info(f"V2 Unblock raw request successful for {target_user_id}.")
+            return True
+        except Exception as e:
+            logging.error(f"V2 Unblock raw request failed for {target_user_id}: {e}")
+            return False
+
     def unblock_user(self, user_id: int) -> bool | str | None:
         """
         Unblocks a single user by their ID using the V1.1 API (via Tweepy).
+        Handles 'Zombie Blocks' (Active users that return 404 on V1 unblock) by falling back to V2.
 
         Args:
             user_id: The integer ID of the user to unblock.
@@ -206,11 +243,20 @@ class XService:
             return True
 
         except tweepy.errors.NotFound as e:
-            # User not found (404) - Ghost Block
+            # V1 says 404. Could be Ghost (Deleted) or Zombie (Active but V1 glitch).
             logging.warning(
-                f"User ID {user_id} not found (404). API says: {e}. Skipping (Ghost Block)."
+                f"User ID {user_id} not found (404) on V1. API says: {e}. Checking if user exists (Zombie check)..."
             )
-            return "NOT_FOUND"
+            
+            if self._check_user_exists_v1(user_id):
+                logging.info(f"User ID {user_id} EXISTS. Attempting V2 Unblock (Zombie Fix)...")
+                if self._unblock_user_v2(user_id):
+                    return True
+                else:
+                    return None # Retry later
+            else:
+                 logging.warning(f"User ID {user_id} confirmed missing. Skipping (Ghost Block).")
+                 return "NOT_FOUND"
 
         except tweepy.errors.Forbidden as e:
             # Forbidden (403) - Suspended or otherwise inaccessible
