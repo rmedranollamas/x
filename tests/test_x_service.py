@@ -209,6 +209,54 @@ def test_unblock_user_zombie_block(x_service, caplog):
     x_service.client_v2.request.assert_called_once()
 
 
+def test_unblock_user_zombie_block_v2_fail_404(x_service, caplog):
+    """Test unblocking a 'Zombie' user where V2 ALSO fails with 404."""
+    # Arrange
+    mock_response_404 = MagicMock()
+    mock_response_404.status_code = 404
+    
+    # 1. V1 Unblock fails with 404
+    x_service.api_v1.destroy_block.side_effect = tweepy.errors.NotFound(mock_response_404)
+    
+    # 2. V1 get_user succeeds (User exists)
+    x_service.api_v1.get_user.return_value = MagicMock(id=123)
+    
+    # 3. V2 Unblock fails with 404
+    x_service.client_v2.request.side_effect = tweepy.errors.NotFound(mock_response_404)
+
+    # Act
+    with caplog.at_level(os.environ.get("LOG_LEVEL", "INFO")):
+        result = x_service.unblock_user(123)
+
+    # Assert
+    assert result == "NOT_FOUND" # Should mark as handled (skipped)
+    assert "V2 Unblock ALSO returned 404" in caplog.text
+    assert "Unblock impossible. Skipping." in caplog.text
+
+
+def test_unblock_user_suspended_is_ghost(x_service, caplog):
+    """Test that suspended users (403) during existence check are treated as ghosts."""
+    # Arrange
+    mock_response_404 = MagicMock()
+    mock_response_404.status_code = 404
+    mock_response_403 = MagicMock()
+    mock_response_403.status_code = 403
+    
+    # 1. V1 Unblock fails with 404
+    x_service.api_v1.destroy_block.side_effect = tweepy.errors.NotFound(mock_response_404)
+    
+    # 2. V1 get_user fails with 403 Forbidden (Suspended)
+    x_service.api_v1.get_user.side_effect = tweepy.errors.Forbidden(mock_response_403)
+
+    # Act
+    with caplog.at_level(os.environ.get("LOG_LEVEL", "INFO")):
+        result = x_service.unblock_user(123)
+
+    # Assert
+    assert result == "NOT_FOUND" # Should treat as ghost
+    assert "is suspended (Forbidden). Treating as Ghost Block." in caplog.text
+
+
 def test_unblock_user_generic_error(x_service, caplog):
     """Test unblocking a user handles generic errors (V1.1 Tweepy)."""
     # Arrange
