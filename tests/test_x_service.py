@@ -164,7 +164,7 @@ def test_unblock_user_not_found(x_service, caplog):
     mock_response = MagicMock()
     mock_response.status_code = 404
     x_service.api_v1.destroy_block.side_effect = tweepy.errors.NotFound(mock_response)
-    
+
     # Simulate 404 from get_user (Confirming user is missing)
     x_service.api_v1.get_user.side_effect = tweepy.errors.NotFound(mock_response)
 
@@ -184,13 +184,15 @@ def test_unblock_user_zombie_block(x_service, caplog):
     # Arrange
     mock_response_404 = MagicMock()
     mock_response_404.status_code = 404
-    
+
     # 1. V1 Unblock fails with 404
-    x_service.api_v1.destroy_block.side_effect = tweepy.errors.NotFound(mock_response_404)
-    
+    x_service.api_v1.destroy_block.side_effect = tweepy.errors.NotFound(
+        mock_response_404
+    )
+
     # 2. V1 get_user succeeds (User exists)
     x_service.api_v1.get_user.return_value = MagicMock(id=123)
-    
+
     # 3. V2 Unblock raw request setup
     # x_service uses client_v2.request.
     # We mock it to return success or raise error.
@@ -214,13 +216,15 @@ def test_unblock_user_zombie_block_v2_fail_404(x_service, caplog):
     # Arrange
     mock_response_404 = MagicMock()
     mock_response_404.status_code = 404
-    
+
     # 1. V1 Unblock fails with 404
-    x_service.api_v1.destroy_block.side_effect = tweepy.errors.NotFound(mock_response_404)
-    
+    x_service.api_v1.destroy_block.side_effect = tweepy.errors.NotFound(
+        mock_response_404
+    )
+
     # 2. V1 get_user succeeds (User exists)
     x_service.api_v1.get_user.return_value = MagicMock(id=123)
-    
+
     # 3. V2 Unblock fails with 404
     x_service.client_v2.request.side_effect = tweepy.errors.NotFound(mock_response_404)
 
@@ -229,7 +233,7 @@ def test_unblock_user_zombie_block_v2_fail_404(x_service, caplog):
         result = x_service.unblock_user(123)
 
     # Assert
-    assert result == "NOT_FOUND" # Should mark as handled (skipped)
+    assert result == "NOT_FOUND"  # Should mark as handled (skipped)
     assert "V2 Unblock ALSO returned 404" in caplog.text
     assert "Unblock impossible. Skipping." in caplog.text
 
@@ -241,10 +245,12 @@ def test_unblock_user_suspended_is_ghost(x_service, caplog):
     mock_response_404.status_code = 404
     mock_response_403 = MagicMock()
     mock_response_403.status_code = 403
-    
+
     # 1. V1 Unblock fails with 404
-    x_service.api_v1.destroy_block.side_effect = tweepy.errors.NotFound(mock_response_404)
-    
+    x_service.api_v1.destroy_block.side_effect = tweepy.errors.NotFound(
+        mock_response_404
+    )
+
     # 2. V1 get_user fails with 403 Forbidden (Suspended)
     x_service.api_v1.get_user.side_effect = tweepy.errors.Forbidden(mock_response_403)
 
@@ -253,7 +259,7 @@ def test_unblock_user_suspended_is_ghost(x_service, caplog):
         result = x_service.unblock_user(123)
 
     # Assert
-    assert result == "NOT_FOUND" # Should treat as ghost
+    assert result == "NOT_FOUND"  # Should treat as ghost
     assert "is suspended (Forbidden). Treating as Ghost Block." in caplog.text
 
 

@@ -164,7 +164,9 @@ class XService:
             return False
         except tweepy.errors.Forbidden as e:
             # User suspended (403). Cannot be unblocked usually. Treat as Ghost to skip.
-            logging.warning(f"User {user_id} is suspended (Forbidden). Treating as Ghost Block. API says: {e}")
+            logging.warning(
+                f"User {user_id} is suspended (Forbidden). Treating as Ghost Block. API says: {e}"
+            )
             return False
         except Exception as e:
             logging.warning(f"Error checking existence of user {user_id}: {e}")
@@ -217,7 +219,7 @@ class XService:
         url = f"/2/users/{self.authenticated_user_id}/blocking/{target_user_id}"
         response = self.client_v2.request(method="DELETE", route=url)
         logging.debug(f"V2 Unblock response: {response}")
-        
+
         # If we are here, it likely succeeded (Tweepy raises on error).
         logging.info(f"V2 Unblock raw request successful for {target_user_id}.")
         return True
@@ -244,21 +246,27 @@ class XService:
             logging.warning(
                 f"User ID {user_id} not found (404) on V1. API says: {e}. Checking if user exists (Zombie check)..."
             )
-            
+
             if self._check_user_exists_v1(user_id):
-                logging.info(f"User ID {user_id} EXISTS. Attempting V2 Unblock (Zombie Fix)...")
+                logging.info(
+                    f"User ID {user_id} EXISTS. Attempting V2 Unblock (Zombie Fix)..."
+                )
                 try:
                     self._unblock_user_v2(user_id)
                     return True
                 except tweepy.errors.NotFound as v2_e:
-                    logging.warning(f"V2 Unblock ALSO returned 404 for {user_id}. Unblock impossible. Skipping. API says: {v2_e}")
-                    return "NOT_FOUND" # Mark as handled to stop loop
+                    logging.warning(
+                        f"V2 Unblock ALSO returned 404 for {user_id}. Unblock impossible. Skipping. API says: {v2_e}"
+                    )
+                    return "NOT_FOUND"  # Mark as handled to stop loop
                 except Exception as v2_e:
-                     logging.error(f"V2 Unblock failed for {user_id}: {v2_e}")
-                     return None # Retry later
+                    logging.error(f"V2 Unblock failed for {user_id}: {v2_e}")
+                    return None  # Retry later
             else:
-                 logging.warning(f"User ID {user_id} confirmed missing. Skipping (Ghost Block).")
-                 return "NOT_FOUND"
+                logging.warning(
+                    f"User ID {user_id} confirmed missing. Skipping (Ghost Block)."
+                )
+                return "NOT_FOUND"
 
         except tweepy.errors.Forbidden as e:
             # Forbidden (403) - Suspended or otherwise inaccessible
