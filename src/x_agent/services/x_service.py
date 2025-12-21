@@ -256,11 +256,26 @@ class XService:
                     return True
                 except tweepy.errors.NotFound as v2_e:
                     logging.warning(
-                        f"V2 Unblock ALSO returned 404 for {user_id}. Unblock impossible. Skipping. API says: {v2_e}"
+                        f"V2 Unblock ALSO returned 404 for {user_id}. Attempting Toggle Block Fix (Block->Unblock)... API says: {v2_e}"
                     )
-                    return "NOT_FOUND"  # Mark as handled to stop loop
+                    try:
+                        self.api_v1.create_block(user_id=user_id)
+                        time.sleep(1)
+                        self.api_v1.destroy_block(user_id=user_id)
+                        logging.info(f"Toggle Block Fix successful for {user_id}!")
+                        return True
+                    except Exception as toggle_e:
+                        logging.warning(
+                            f"Toggle Block Fix failed for {user_id}: {toggle_e} Will retry in next session."
+                        )
+                        return None  # Do NOT mark as Ghost if user exists
+                except tweepy.errors.TooManyRequests as v2_e:
+                    self._handle_rate_limit(v2_e)
+                    return None
                 except Exception as v2_e:
-                    logging.error(f"V2 Unblock failed for {user_id}: {v2_e}")
+                    logging.error(
+                        f"V2 Unblock failed for {user_id}: {v2_e}. Will retry in next session."
+                    )
                     return None  # Retry later
             else:
                 logging.warning(

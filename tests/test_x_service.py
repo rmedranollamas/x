@@ -212,7 +212,7 @@ def test_unblock_user_zombie_block(x_service, caplog):
 
 
 def test_unblock_user_zombie_block_v2_fail_404(x_service, caplog):
-    """Test unblocking a 'Zombie' user where V2 ALSO fails with 404."""
+    """Test unblocking a 'Zombie' user where V2 ALSO fails with 404, and Toggle Fix fails."""
     # Arrange
     mock_response_404 = MagicMock()
     mock_response_404.status_code = 404
@@ -228,14 +228,51 @@ def test_unblock_user_zombie_block_v2_fail_404(x_service, caplog):
     # 3. V2 Unblock fails with 404
     x_service.client_v2.request.side_effect = tweepy.errors.NotFound(mock_response_404)
 
+    # 4. Toggle Fix (V1 Block -> Unblock) setup
+    # Note: api_v1.destroy_block is already set to raise NotFound above.
+    # We want it to stay that way to simulate toggle fix failure.
+    x_service.api_v1.create_block.return_value = MagicMock()
+
     # Act
     with caplog.at_level(os.environ.get("LOG_LEVEL", "INFO")):
         result = x_service.unblock_user(123)
 
     # Assert
-    assert result == "NOT_FOUND"  # Should mark as handled (skipped)
+    assert result is None  # Should return None to retry later
     assert "V2 Unblock ALSO returned 404" in caplog.text
-    assert "Unblock impossible. Skipping." in caplog.text
+    assert "Attempting Toggle Block Fix" in caplog.text
+    assert "Toggle Block Fix failed" in caplog.text
+
+
+def test_unblock_user_toggle_fix_success(x_service, caplog):
+    """Test unblocking a 'Zombie' user where V2 fails but Toggle Fix succeeds."""
+    # Arrange
+    mock_response_404 = MagicMock()
+    mock_response_404.status_code = 404
+
+    # 1. V1 Unblock fails with 404
+    # We use side_effect with a list to make it fail the first time, then succeed for the Toggle Fix
+    x_service.api_v1.destroy_block.side_effect = [
+        tweepy.errors.NotFound(mock_response_404),
+        MagicMock(),
+    ]
+
+    # 2. V1 get_user succeeds (User exists)
+    x_service.api_v1.get_user.return_value = MagicMock(id=123)
+
+    # 3. V2 Unblock fails with 404
+    x_service.client_v2.request.side_effect = tweepy.errors.NotFound(mock_response_404)
+
+    # 4. V1 Create Block succeeds
+    x_service.api_v1.create_block.return_value = MagicMock()
+
+    # Act
+    with caplog.at_level(os.environ.get("LOG_LEVEL", "INFO")):
+        result = x_service.unblock_user(123)
+
+    # Assert
+    assert result is True
+    assert "Toggle Block Fix successful" in caplog.text
 
 
 def test_unblock_user_suspended_is_ghost(x_service, caplog):
