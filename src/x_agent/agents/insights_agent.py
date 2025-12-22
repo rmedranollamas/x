@@ -59,7 +59,7 @@ class InsightsAgent(BaseAgent):
         self,
         current_followers: int,
         current_following: int,
-        latest_insight: Optional[dict] = None,
+        latest_insight: Optional["Row"] = None,
     ) -> None:
         """
         Generates and prints a report comparing current and previous metrics.
