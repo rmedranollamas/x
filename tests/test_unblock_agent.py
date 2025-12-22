@@ -53,15 +53,8 @@ async def test_execute_empty_db_fetches_from_api(
     mock_database.add_blocked_users.assert_called_once_with({1, 2, 3})
     assert mock_x_service.unblock_user.await_count == 3
 
-    # Check that status updates happened
-    mock_database.update_user_status.assert_has_calls(
-        [
-            call(1, "UNBLOCKED"),
-            call(2, "UNBLOCKED"),
-            call(3, "UNBLOCKED"),
-        ],
-        any_order=True,
-    )
+    # Check that batch status updates happened
+    mock_database.update_user_statuses.assert_any_call([1, 2, 3], "UNBLOCKED")
 
 
 @pytest.mark.asyncio
@@ -79,14 +72,7 @@ async def test_execute_resumes_from_db(unblock_agent, mock_x_service, mock_datab
 
     mock_x_service.get_blocked_user_ids.assert_not_called()
     assert mock_x_service.unblock_user.await_count == 3
-    mock_database.update_user_status.assert_has_calls(
-        [
-            call(3, "UNBLOCKED"),
-            call(4, "UNBLOCKED"),
-            call(5, "UNBLOCKED"),
-        ],
-        any_order=True,
-    )
+    mock_database.update_user_statuses.assert_any_call([3, 4, 5], "UNBLOCKED")
 
 
 @pytest.mark.asyncio
@@ -118,11 +104,11 @@ async def test_execute_handles_not_found_and_errors(
     await unblock_agent.execute()
 
     assert mock_x_service.unblock_user.await_count == 3
-    mock_database.update_user_status.assert_has_calls(
+    mock_database.update_user_statuses.assert_has_calls(
         [
-            call(1, "UNBLOCKED"),
-            call(2, "NOT_FOUND"),
-            call(3, "FAILED"),
+            call([1], "UNBLOCKED"),
+            call([2], "NOT_FOUND"),
+            call([3], "FAILED"),
         ],
         any_order=True,
     )

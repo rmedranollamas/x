@@ -140,3 +140,16 @@ def update_user_status(user_id: int, status: str) -> None:
             "UPDATE blocked_users SET status = ?, updated_at = (STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW')) WHERE user_id = ?",
             (status, user_id),
         )
+
+
+def update_user_statuses(user_ids: List[int], status: str) -> None:
+    """Batch updates the status of multiple users."""
+    if not user_ids:
+        return
+    with db_transaction() as conn:
+        cursor = conn.cursor()
+        data = [(status, uid) for uid in user_ids]
+        cursor.executemany(
+            "UPDATE blocked_users SET status = ?, updated_at = (STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW')) WHERE user_id = ?",
+            data,
+        )

@@ -93,57 +93,54 @@ class UnblockAgent(BaseAgent):
             f"Starting the unblocking process for {total_to_unblock_session} accounts..."
         )
 
-        session_unblocked_count = 0
-        failed_count = 0
-
-        # Limit concurrency
         sem = asyncio.Semaphore(20)
-        lock = asyncio.Lock()
 
-        async def unblock_worker(user_id):
-            nonlocal session_unblocked_count, failed_count
+        async def unblock_worker(user_id: int) -> tuple[int, str]:
             async with sem:
                 status = await self.x_service.unblock_user(user_id)
-
-                if status == "SUCCESS":
-                    await asyncio.to_thread(
-                        database.update_user_status, user_id, "UNBLOCKED"
-                    )
-                    async with lock:
-                        session_unblocked_count += 1
-
-                        processed_so_far = (
-                            already_unblocked_count
-                            + session_unblocked_count
-                            + failed_count
-                        )
-                        remaining = total_blocked_count - processed_so_far
-                        logging.info(
-                            f"Unblocked ID {user_id}. Remaining: ~{remaining}",
-                            extra={"single_line": True},
-                        )
-
-                elif status == "NOT_FOUND":
-                    await asyncio.to_thread(
-                        database.update_user_status, user_id, "NOT_FOUND"
-                    )
-                    async with lock:
-                        failed_count += 1
-                    logging.debug(f"User {user_id} not found (possibly deleted).")
-                else:
-                    await asyncio.to_thread(
-                        database.update_user_status, user_id, "FAILED"
-                    )
-                    async with lock:
-                        failed_count += 1
-                    logging.warning(f"Failed to unblock {user_id}.")
+                # Log immediate progress for long sessions
+                logging.info(
+                    f"Processed ID {user_id}: {status}", extra={"single_line": True}
+                )
+                return user_id, status
 
         tasks = [unblock_worker(uid) for uid in ids_to_unblock]
-        await asyncio.gather(*tasks)
+        results = await asyncio.gather(*tasks)
+
+        # Group results by status
+        status_map = {"SUCCESS": [], "NOT_FOUND": [], "FAILED": []}
+        for user_id, status in results:
+            if status in status_map:
+                status_map[status].append(user_id)
+
+        # Batch update database
+        if status_map["SUCCESS"]:
+            await asyncio.to_thread(
+                database.update_user_statuses, status_map["SUCCESS"], "UNBLOCKED"
+            )
+        if status_map["NOT_FOUND"]:
+            await asyncio.to_thread(
+                database.update_user_statuses, status_map["NOT_FOUND"], "NOT_FOUND"
+            )
+        if status_map["FAILED"]:
+            await asyncio.to_thread(
+                database.update_user_statuses, status_map["FAILED"], "FAILED"
+            )
+
+        # Final report
+        session_unblocked_count = len(status_map["SUCCESS"])
+        session_not_found_count = len(status_map["NOT_FOUND"])
+        session_failed_count = len(status_map["FAILED"])
 
         logging.info("\n--- Unblocking Process Complete! ---")
         logging.info(
             f"Total accounts unblocked in this session: {session_unblocked_count}"
         )
-        if failed_count > 0:
-            logging.info(f"Total accounts failed in this session: {failed_count}")
+        if session_not_found_count > 0:
+            logging.info(
+                f"Accounts not found (deleted/suspended): {session_not_found_count}"
+            )
+        if session_failed_count > 0:
+            logging.warning(
+                f"Failed to unblock {session_failed_count} accounts. They will be retried on the next run."
+            )
