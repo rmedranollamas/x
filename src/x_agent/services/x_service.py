@@ -21,7 +21,6 @@ class XService:
             access_token_secret=settings.x_access_token_secret,
             wait_on_rate_limit=True,
         )
-        # v1.1 API for actions not yet in v2 or AsyncClient
         auth = tweepy.OAuth1UserHandler(
             settings.x_api_key,
             settings.x_api_key_secret,
@@ -52,7 +51,6 @@ class XService:
 
         try:
             while cursor != 0:
-                # Use to_thread for sync v1.1 call
                 ids, (_, next_cursor) = await asyncio.to_thread(
                     self.api_v1.get_blocked_ids, cursor=cursor
                 )
@@ -72,10 +70,10 @@ class XService:
         )
         return blocked_user_ids
 
-    async def unblock_user(self, user_id: int) -> str | None:
+    async def unblock_user(self, user_id: int) -> str:
         """
         Unblocks a user using v1.1 API.
-        Returns "SUCCESS", "NOT_FOUND", "FAILED".
+        Returns "SUCCESS", "NOT_FOUND", or "FAILED".
         """
         try:
             await asyncio.to_thread(self.api_v1.destroy_block, user_id=user_id)
@@ -86,5 +84,6 @@ class XService:
             logging.warning(f"Failed to unblock {user_id}: {e}")
             return "FAILED"
 
-    async def get_me(self):
+    async def get_me(self) -> tweepy.Response:
+        """Retrieves the authenticated user's information."""
         return await self.client.get_me(user_fields=["public_metrics"])

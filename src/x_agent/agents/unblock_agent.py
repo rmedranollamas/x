@@ -41,10 +41,12 @@ class UnblockAgent(BaseAgent):
             return
 
         logging.info("--- X Unblock Agent (Async) ---")
-        database.initialize_database()
+        await asyncio.to_thread(database.initialize_database)
 
         # --- State Loading and Resumption Logic ---
-        total_blocked_count = database.get_all_blocked_users_count()
+        total_blocked_count = await asyncio.to_thread(
+            database.get_all_blocked_users_count
+        )
 
         if total_blocked_count == 0:
             logging.info(
@@ -52,7 +54,7 @@ class UnblockAgent(BaseAgent):
             )
             all_blocked_ids = await self.x_service.get_blocked_user_ids()
             if all_blocked_ids:
-                database.add_blocked_users(all_blocked_ids)
+                await asyncio.to_thread(database.add_blocked_users, all_blocked_ids)
                 total_blocked_count = len(all_blocked_ids)
                 logging.info(f"Saved {total_blocked_count} blocked IDs to database.")
             else:
@@ -61,8 +63,8 @@ class UnblockAgent(BaseAgent):
         else:
             logging.info(f"Found {total_blocked_count} blocked IDs in database.")
 
-        pending_ids = database.get_pending_blocked_users()
-        processed_count = database.get_processed_users_count()
+        pending_ids = await asyncio.to_thread(database.get_pending_blocked_users)
+        processed_count = await asyncio.to_thread(database.get_processed_users_count)
 
         logging.info(
             f"Already processed: {processed_count}. Remaining to unblock: {len(pending_ids)}."
@@ -103,7 +105,9 @@ class UnblockAgent(BaseAgent):
                 status = await self.x_service.unblock_user(user_id)
 
                 if status == "SUCCESS":
-                    database.update_user_status(user_id, "UNBLOCKED")
+                    await asyncio.to_thread(
+                        database.update_user_status, user_id, "UNBLOCKED"
+                    )
                     session_unblocked_count += 1
 
                     processed_so_far = (
@@ -116,11 +120,15 @@ class UnblockAgent(BaseAgent):
                     )
 
                 elif status == "NOT_FOUND":
-                    database.update_user_status(user_id, "NOT_FOUND")
+                    await asyncio.to_thread(
+                        database.update_user_status, user_id, "NOT_FOUND"
+                    )
                     failed_count += 1
                     logging.debug(f"User {user_id} not found (possibly deleted).")
                 else:
-                    database.update_user_status(user_id, "FAILED")
+                    await asyncio.to_thread(
+                        database.update_user_status, user_id, "FAILED"
+                    )
                     failed_count += 1
                     logging.warning(f"Failed to unblock {user_id}.")
 
@@ -131,3 +139,5 @@ class UnblockAgent(BaseAgent):
         logging.info(
             f"Total accounts unblocked in this session: {session_unblocked_count}"
         )
+        if failed_count > 0:
+            logging.info(f"Total accounts failed in this session: {failed_count}")

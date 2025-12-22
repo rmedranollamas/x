@@ -1,4 +1,5 @@
 import logging
+import tweepy
 from .base_agent import BaseAgent
 from ..services.x_service import XService
 from .. import database
@@ -9,23 +10,28 @@ class InsightsAgent(BaseAgent):
 
     agent_name = "insights"
 
-    def __init__(self, x_service: XService):
+    def __init__(self, x_service: XService) -> None:
+        """
+        Initializes the agent with a service to interact with the X API.
+
+        Args:
+            x_service: An instance of XService.
+        """
         self.x_service = x_service
 
-    async def execute(self):
+    async def execute(self) -> None:
         """Runs the insights agent to generate and store the daily report."""
         logging.info("Starting the insights agent...")
 
         database.initialize_database()
 
         try:
-            # Ensure authentication
             if not self.x_service.user_id:
                 await self.x_service.initialize()
 
             response = await self.x_service.get_me()
             me_data = response.data
-        except Exception as e:
+        except tweepy.errors.TweepyException as e:
             logging.error(f"Could not retrieve user metrics: {e}")
             return
 
@@ -47,7 +53,9 @@ class InsightsAgent(BaseAgent):
 
         logging.info("Insights agent finished successfully.")
 
-    def _generate_report(self, current_followers, current_following, latest_insight):
+    def _generate_report(
+        self, current_followers: int, current_following: int, latest_insight: dict
+    ) -> None:
         """Generates and prints a report comparing current and previous metrics."""
         report_lines = ["\n--- Daily X Account Insights ---"]
 
