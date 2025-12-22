@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, call
 import os
 
 from src.x_agent.agents.unblock_agent import UnblockAgent
@@ -15,7 +15,7 @@ def mock_x_service():
 @pytest.fixture
 def unblock_agent(mock_x_service):
     """Fixture for an UnblockAgent instance with a mocked XService."""
-    return UnblockAgent()
+    return UnblockAgent(x_service=mock_x_service)
 
 
 @pytest.fixture
@@ -28,19 +28,18 @@ def mock_db():
 def test_execute_no_blocked_ids_initially(unblock_agent, mock_x_service, mock_db):
     """Test execute when no blocked IDs are in the database and the API returns some."""
     # --- Arrange ---
-    # Mock the database to simulate no cached IDs
-    mock_db.get_all_blocked_ids_from_db.return_value = set()
+    # Mock the database to simulate behavior:
+    # 1. Agent fetches from API -> returns [1, 2, 3]
+    # 2. Agent saves to DB.
+    # 3. Agent uses API list for queue.
+    mock_db.get_all_blocked_ids_from_db.return_value = {1, 2, 3}
     mock_db.get_unblocked_ids_from_db.return_value = set()
 
     # Mock the API to return a list of blocked IDs
-    mock_x_service.get_blocked_user_ids.return_value = {1, 2, 3}
+    mock_x_service.get_blocked_user_ids.return_value = [1, 2, 3]
 
-    # Mock the unblock calls to simulate success
-    mock_x_service.unblock_user.side_effect = [
-        MagicMock(screen_name="user1"),
-        MagicMock(screen_name="user2"),
-        MagicMock(screen_name="user3"),
-    ]
+    # Mock the unblock calls to simulate success (returning True)
+    mock_x_service.unblock_user.side_effect = [True, True, True]
 
     # --- Act ---
     unblock_agent.execute()
@@ -65,39 +64,66 @@ def test_execute_all_unblocked_from_start(unblock_agent, mock_x_service, mock_db
     """Test execute when all blocked IDs are already unblocked."""
     mock_db.get_all_blocked_ids_from_db.return_value = {1, 2, 3}
     mock_db.get_unblocked_ids_from_db.return_value = {1, 2, 3}
+    # API returns empty list? No, if API returns list, we process it.
+    # If API returns empty list, we fall back to DB.
+    # Here we assume API returns empty to test the "Nothing to do" path from DB fallback?
+    # Or if API returns IDs, we unblock them.
+    # The original test likely assumed API returned nothing or matching DB?
+    # Let's assume API returns nothing for this test case.
+    mock_x_service.get_blocked_user_ids.return_value = []
 
     unblock_agent.execute()
 
-    mock_x_service.get_blocked_user_ids.assert_not_called()
+    # API should be checked
+    mock_x_service.get_blocked_user_ids.assert_called_once()
+    # Unblock not called because API returned nothing and DB calc showed nothing to do
     mock_x_service.unblock_user.assert_not_called()
 
 
 def test_execute_resumes_unblocking(unblock_agent, mock_x_service, mock_db):
-    """Test execute resumes unblocking from where it left off."""
+    """Test execute resumes unblocking, skipping locally completed IDs (Ghost protection)."""
+
     mock_db.get_all_blocked_ids_from_db.return_value = {1, 2, 3, 4, 5}
+
     mock_db.get_unblocked_ids_from_db.return_value = {1, 2}
-    mock_x_service.unblock_user.side_effect = [
-        MagicMock(screen_name="user3"),
-        MagicMock(screen_name="user4"),
-        MagicMock(screen_name="user5"),
-    ]
+
+    # The API returns all 5 (including ghosts 1 and 2)
+
+    mock_x_service.get_blocked_user_ids.return_value = [1, 2, 3, 4, 5]
+
+    # It should ONLY try to unblock 3, 4, 5.
+
+    # 1 and 2 are skipped because they are in the DB.
+
+    mock_x_service.unblock_user.side_effect = [True, True, True]
 
     unblock_agent.execute()
 
-    mock_x_service.get_blocked_user_ids.assert_not_called()
+    # Verify calls
+
     assert mock_x_service.unblock_user.call_count == 3
-    assert mock_db.mark_user_as_unblocked_in_db.call_count == 3
+
+    mock_x_service.unblock_user.assert_has_calls([call(3), call(4), call(5)])
+
+    # Verify 1 and 2 were NOT called
+
+    call_args_list = mock_x_service.unblock_user.call_args_list
+
+    args = [c[0][0] for c in call_args_list]
+
+    assert 1 not in args
+
+    assert 2 not in args
 
 
 def test_execute_handles_not_found_users(unblock_agent, mock_x_service, mock_db):
     """Test execute handles users that are not found (deleted/suspended)."""
     mock_db.get_all_blocked_ids_from_db.return_value = {1, 2, 3}
     mock_db.get_unblocked_ids_from_db.return_value = set()
-    mock_x_service.unblock_user.side_effect = [
-        MagicMock(screen_name="user1"),
-        "NOT_FOUND",
-        MagicMock(screen_name="user3"),
-    ]
+    # The agent now relies on the API return for the queue order
+    mock_x_service.get_blocked_user_ids.return_value = [1, 2, 3]
+
+    mock_x_service.unblock_user.side_effect = [True, "NOT_FOUND", True]
 
     unblock_agent.execute()
 
@@ -109,11 +135,10 @@ def test_execute_handles_unblock_errors(unblock_agent, mock_x_service, mock_db, 
     """Test execute handles generic unblock errors and retries on next run."""
     mock_db.get_all_blocked_ids_from_db.return_value = {1, 2, 3}
     mock_db.get_unblocked_ids_from_db.return_value = set()
-    mock_x_service.unblock_user.side_effect = [
-        MagicMock(screen_name="user1"),
-        None,  # Simulate a generic error
-        MagicMock(screen_name="user3"),
-    ]
+    # The agent now relies on the API return for the queue order
+    mock_x_service.get_blocked_user_ids.return_value = [1, 2, 3]
+
+    mock_x_service.unblock_user.side_effect = [True, None, True]
 
     with caplog.at_level(os.environ.get("LOG_LEVEL", "INFO")):
         unblock_agent.execute()
@@ -126,7 +151,7 @@ def test_execute_handles_unblock_errors(unblock_agent, mock_x_service, mock_db, 
 def test_execute_no_blocked_ids_from_api(unblock_agent, mock_x_service, mock_db):
     """Test execute when API returns no blocked IDs."""
     mock_db.get_all_blocked_ids_from_db.return_value = set()
-    mock_x_service.get_blocked_user_ids.return_value = set()
+    mock_x_service.get_blocked_user_ids.return_value = []
 
     unblock_agent.execute()
 

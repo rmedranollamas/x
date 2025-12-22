@@ -17,3 +17,6 @@ dev = [
     "pytest",
     "pytest-mock",
 ]
+
+[tool.setuptools.packages.find]
+where = ["src"]

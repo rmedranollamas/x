@@ -12,9 +12,13 @@ class XService:
     Handles client authentication, rate limiting, and API calls.
     """
 
+    _TOGGLE_FIX_DELAY_SECONDS = 1
+
     def __init__(self) -> None:
         """Initializes the XService, creating authenticated API clients."""
-        self.api_v1, self.client_v2 = self._create_tweepy_clients()
+        self.api_v1, self.client_v2, self.authenticated_user_id = (
+            self._create_tweepy_clients()
+        )
 
     def _countdown(self, seconds: int, message: str = "Waiting...") -> None:
         """
@@ -82,12 +86,12 @@ class XService:
         api_key_secret: str,
         access_token: str,
         access_token_secret: str,
-    ) -> tweepy.Client:
+    ) -> tuple[tweepy.Client, int]:
         """
         Creates and authenticates the Tweepy v2 client.
 
         Returns:
-            An authenticated Tweepy v2 client.
+            A tuple of (authenticated Tweepy v2 client, authenticated user ID).
         """
         try:
             client_v2 = tweepy.Client(
@@ -95,11 +99,12 @@ class XService:
                 consumer_secret=api_key_secret,
                 access_token=access_token,
                 access_token_secret=access_token_secret,
-                wait_on_rate_limit=False,
+                wait_on_rate_limit=True,
             )
             auth_user = client_v2.get_me(user_fields=["id"])
-            logging.debug(f"Authenticated as user ID: {auth_user.data.id}")
-            return client_v2
+            user_id = auth_user.data.id
+            logging.debug(f"Authenticated as user ID: {user_id}")
+            return client_v2, user_id
         except Exception as e:
             logging.error(f"Error during API v2 authentication: {e}", exc_info=True)
             sys.exit(1)
@@ -121,25 +126,25 @@ class XService:
             auth = tweepy.OAuth1UserHandler(
                 api_key, api_key_secret, access_token, access_token_secret
             )
-            api_v1 = tweepy.API(auth, wait_on_rate_limit=False)
+            api_v1 = tweepy.API(auth, wait_on_rate_limit=True)
             return api_v1
         except Exception as e:
             logging.error(f"Error during API v1.1 authentication: {e}", exc_info=True)
             sys.exit(1)
 
-    def _create_tweepy_clients(self) -> tuple[tweepy.API, tweepy.Client]:
+    def _create_tweepy_clients(self) -> tuple[tweepy.API, tweepy.Client, int]:
         """
         Loads credentials and creates authenticated Tweepy clients.
 
         Returns:
-            A tuple containing the v1.1 API object and the v2 client.
+            A tuple containing the v1.1 API object, the v2 client, and the user ID.
         """
         api_key, api_key_secret, access_token, access_token_secret = (
             self._get_credentials()
         )
 
         logging.info("Authenticating with the X API...")
-        client_v2 = self._create_v2_client(
+        client_v2, user_id = self._create_v2_client(
             api_key, api_key_secret, access_token, access_token_secret
         )
         api_v1 = self._create_v1_client(
@@ -147,72 +152,211 @@ class XService:
         )
 
         logging.info("Authentication successful for both API v1.1 and v2.")
-        return api_v1, client_v2
+        return api_v1, client_v2, user_id
 
-    def get_blocked_user_ids(self) -> set[int]:
+    def _check_user_exists_v1(self, user_id: int) -> bool:
         """
-        Fetches the complete list of blocked user IDs from the API.
+        Verifies if a user actually exists using V1.1 API.
+        Used to distinguish between 'Ghost Blocks' (User deleted) and 'Zombie Blocks' (User active but V1 unblock fails).
+        """
+        try:
+            self.api_v1.get_user(user_id=user_id)
+            return True
+        except tweepy.errors.NotFound:
+            return False
+        except tweepy.errors.Forbidden as e:
+            # User suspended (403). Cannot be unblocked usually. Treat as Ghost to skip.
+            logging.warning(
+                f"User {user_id} is suspended (Forbidden). Treating as Ghost Block. API says: {e}"
+            )
+            return False
+        except Exception as e:
+            logging.warning(f"Error checking existence of user {user_id}: {e}")
+            # Assume exists to be safe and retry? Or assume not?
+            # If we can't verify, we shouldn't mark as Ghost (forever skip).
+            return True
+
+    def get_blocked_user_ids(self) -> list[int]:
+        """
+        Fetches the complete list of blocked user IDs from the API using V1.1.
+        We switched to V1.1 because V2 was returning 'Ghost' IDs that return 404 on unblock.
+        Matching the List source (V1.1) with the Unblock source (V1.1) reduces inconsistency.
 
         Returns:
-            A set of integer user IDs.
+            A list of integer user IDs.
         """
-        logging.info("Fetching blocked account IDs... (This will be fast)")
-        blocked_user_ids = set()
-        cursor = -1
-        while True:
-            try:
-                logging.debug(f"Fetching blocked IDs with cursor: {cursor}")
-                ids, (_, next_cursor) = self.api_v1.get_blocked_ids(cursor=cursor)
-                blocked_user_ids.update(ids)
-                logging.info(
-                    f"Found {len(blocked_user_ids)} blocked account IDs...",
-                    extra={"single_line": True},
-                )
-                cursor = next_cursor
-                if cursor == 0:
-                    break
-            except tweepy.errors.TooManyRequests as e:
-                self._handle_rate_limit(e)
-                continue
-            except Exception as e:
-                logging.error(
-                    f"An unexpected error occurred while fetching: {e}", exc_info=True
-                )
-                sys.exit(1)
+        logging.info(
+            "Fetching blocked account IDs via V1.1... (This aligns with V1.1 unblock)"
+        )
+        blocked_user_ids = []
+
+        try:
+            # Use Tweepy's Cursor to handle V1.1 pagination automatically.
+            # self.api_v1 is configured with wait_on_rate_limit=True
+            for page in tweepy.Cursor(self.api_v1.get_blocked_ids).pages():
+                # page is a list of integer IDs in V1.1 get_blocked_ids
+                if page:
+                    logging.debug(f"Raw IDs received from API V1.1: {page}")
+                    blocked_user_ids.extend(page)
+                    logging.info(
+                        f"Found {len(blocked_user_ids)} blocked account IDs...",
+                        extra={"single_line": True},
+                    )
+        except Exception as e:
+            logging.error(
+                f"An unexpected error occurred while fetching: {e}", exc_info=True
+            )
+            sys.exit(1)
+
         logging.info(
             f"Finished fetching. Found a total of {len(blocked_user_ids)} blocked account IDs."
         )
         return blocked_user_ids
 
-    def unblock_user(self, user_id: int) -> tweepy.User | str | None:
+    def _unblock_user_v2(self, target_user_id: int) -> bool:
         """
-        Unblocks a single user by their ID.
+        Attempts to unblock a user using the V2 API via a raw request.
+        Raises exceptions if the request fails, allowing the caller to handle specific error codes.
+        """
+        url = f"/2/users/{self.authenticated_user_id}/blocking/{target_user_id}"
+        response = self.client_v2.request(method="DELETE", route=url)
+        logging.debug(f"V2 Unblock response: {response}")
+
+        # If we are here, it likely succeeded (Tweepy raises on error).
+        logging.info(f"V2 Unblock raw request successful for {target_user_id}.")
+        return True
+
+    def _attempt_toggle_block_fix(self, user_id: int) -> bool:
+        """
+        Attempts to fix a 'Zombie Block' by blocking and then unblocking the user via V1.1.
+
+        Args:
+            user_id: The integer ID of the user.
+
+        Returns:
+            True if the toggle fix (Block -> Unblock) succeeded, False otherwise.
+        """
+        try:
+            logging.info(
+                f"Attempting Toggle Block Fix (Block->Unblock) for {user_id}..."
+            )
+            self.api_v1.create_block(user_id=user_id)
+            time.sleep(self._TOGGLE_FIX_DELAY_SECONDS)
+            self.api_v1.destroy_block(user_id=user_id)
+            logging.info(f"Toggle Block Fix successful for {user_id}!")
+            return True
+        except Exception as e:
+            logging.warning(f"Toggle Block Fix failed for {user_id}: {e}")
+            return False
+
+    def _handle_zombie_recovery(self, user_id: int) -> bool | None:
+        """
+        Handles recovery strategies for active users that return 404 on initial unblock.
+        Tries V2 fallback followed by a Toggle Block Fix.
+
+        Args:
+            user_id: The integer ID of the user.
+
+        Returns:
+            True if unblocked via any recovery method, or None if all failed (to allow retry).
+        """
+        logging.info(
+            f"User ID {user_id} EXISTS. Attempting recovery strategies (Zombie Fix)..."
+        )
+
+        # 1. Try V2 Unblock Fallback
+        try:
+            self._unblock_user_v2(user_id)
+            return True
+        except tweepy.errors.NotFound as e:
+            logging.warning(
+                f"V2 Unblock ALSO returned 404 for {user_id}. API says: {e}"
+            )
+
+            # 2. Try Toggle Block Fix (Block then Unblock)
+            if self._attempt_toggle_block_fix(user_id):
+                return True
+
+            logging.warning(
+                f"All recovery strategies failed for {user_id}. Will retry in next session."
+            )
+            return None  # Signal to retry later
+
+        except tweepy.errors.TooManyRequests as e:
+            self._handle_rate_limit(e)
+            return None
+        except Exception as e:
+            logging.error(
+                f"Recovery failed for {user_id} due to unexpected error: {e}. Will retry in next session."
+            )
+            return None
+
+    def unblock_user(self, user_id: int) -> bool | str | None:
+        """
+        Unblocks a single user by their ID using the V1.1 API (via Tweepy).
+        Handles 'Zombie Blocks' (Active users that return 404 on V1 unblock) by falling back to V2.
 
         Args:
             user_id: The integer ID of the user to unblock.
 
         Returns:
-            The user object if successful, 'NOT_FOUND' if the user does not exist,
-            or None if an error occurs.
+            True if successful, 'NOT_FOUND' if the user does not exist/not blocked (Ghost),
+            or None if an error occurs (e.g. Rate Limit, Network).
         """
-        while True:
-            try:
-                logging.debug(f"Attempting to unblock user ID: {user_id}...")
-                return self.api_v1.destroy_block(user_id=user_id)
-            except tweepy.errors.TooManyRequests as e:
-                self._handle_rate_limit(e)
-                # Retry after waiting
-                continue
-            except tweepy.errors.NotFound:
+        try:
+            logging.debug(f"Attempting to unblock user ID: {user_id}...")
+            self.api_v1.destroy_block(user_id=user_id)
+            return True
+
+        except tweepy.errors.NotFound as e:
+            # V1 says 404. Could be Ghost (Deleted) or Zombie (Active but V1 glitch).
+            logging.warning(
+                f"User ID {user_id} not found (404) on V1. API says: {e}. Checking if user exists..."
+            )
+
+            if self._check_user_exists_v1(user_id):
+                return self._handle_zombie_recovery(user_id)
+            else:
                 logging.warning(
-                    f"User ID {user_id} not found. The account may have been deleted. Skipping."
+                    f"User ID {user_id} confirmed missing. Skipping (Ghost Block)."
                 )
                 return "NOT_FOUND"
-            except Exception as e:
-                logging.error(
-                    f"Could not unblock user ID {user_id}. Reason: {e}", exc_info=True
-                )
-                return None
+
+        except tweepy.errors.Forbidden as e:
+            # Forbidden (403) - Suspended or otherwise inaccessible
+            logging.warning(
+                f"Forbidden (403) for User ID {user_id}. API says: {e}. Skipping."
+            )
+            return "NOT_FOUND"
+
+        except tweepy.errors.TooManyRequests as e:
+            # Rate Limit (429)
+            self._handle_rate_limit(e)
+            return None
+
+        except Exception as e:
+            logging.error(
+                f"Could not unblock user ID {user_id}. Exception: {e}", exc_info=True
+            )
+            return None
+
+        except tweepy.errors.Forbidden as e:
+            # Forbidden (403) - Suspended or otherwise inaccessible
+            logging.warning(
+                f"Forbidden (403) for User ID {user_id}. API says: {e}. Skipping."
+            )
+            return "NOT_FOUND"
+
+        except tweepy.errors.TooManyRequests as e:
+            # Rate Limit (429)
+            self._handle_rate_limit(e)
+            return None
+
+        except Exception as e:
+            logging.error(
+                f"Could not unblock user ID {user_id}. Exception: {e}", exc_info=True
+            )
+            return None
 
     def get_me(self) -> tweepy.User | None:
         """
