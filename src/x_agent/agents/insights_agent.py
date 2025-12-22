@@ -1,4 +1,5 @@
 import logging
+import asyncio
 import tweepy
 from .base_agent import BaseAgent
 from ..services.x_service import XService
@@ -23,7 +24,7 @@ class InsightsAgent(BaseAgent):
         """Runs the insights agent to generate and store the daily report."""
         logging.info("Starting the insights agent...")
 
-        database.initialize_database()
+        await asyncio.to_thread(database.initialize_database)
 
         try:
             if not self.x_service.user_id:
@@ -43,13 +44,13 @@ class InsightsAgent(BaseAgent):
         current_following = me_data.public_metrics.get("following_count", 0)
 
         # Get the previous metrics from the database
-        latest_insight = database.get_latest_insight()
+        latest_insight = await asyncio.to_thread(database.get_latest_insight)
 
         # Generate the report
         self._generate_report(current_followers, current_following, latest_insight)
 
         # Save the new metrics to the database
-        database.add_insight(current_followers, current_following)
+        await asyncio.to_thread(database.add_insight, current_followers, current_following)
 
         logging.info("Insights agent finished successfully.")
 
