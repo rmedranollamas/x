@@ -71,16 +71,9 @@ class UnfollowAgent(BaseAgent):
             logging.info("All targeted accounts have been unfollowed. Nothing to do!")
             return
 
-        await self._unfollow_user_ids(
-            pending_ids, total_following_count, processed_count
-        )
+        await self._unfollow_user_ids(pending_ids)
 
-    async def _unfollow_user_ids(
-        self,
-        ids_to_unfollow: list[int],
-        total_count: int,
-        already_processed_count: int,
-    ) -> None:
+    async def _unfollow_user_ids(self, ids_to_unfollow: list[int]) -> None:
         """
         Iterates through a list of user IDs and unfollows each one concurrently.
         """
@@ -102,22 +95,18 @@ class UnfollowAgent(BaseAgent):
         tasks = [unfollow_worker(uid) for uid in ids_to_unfollow]
         results = await asyncio.gather(*tasks)
 
-        status_map = {"SUCCESS": [], "FAILED": []}
+        # Group results by status
+        status_map = {}
         for user_id, status in results:
-            if status in status_map:
-                status_map[status].append(user_id)
+            status_map.setdefault(status, []).append(user_id)
 
-        if status_map["SUCCESS"]:
-            await asyncio.to_thread(
-                database.update_following_status, status_map["SUCCESS"], "UNFOLLOWED"
-            )
-        if status_map["FAILED"]:
-            await asyncio.to_thread(
-                database.update_following_status, status_map["FAILED"], "FAILED"
-            )
+        # Update database based on status
+        for status, uids in status_map.items():
+            db_status = "UNFOLLOWED" if status == "SUCCESS" else status
+            await asyncio.to_thread(database.update_following_status, uids, db_status)
 
-        session_success = len(status_map["SUCCESS"])
-        session_failed = len(status_map["FAILED"])
+        session_success = len(status_map.get("SUCCESS", []))
+        session_failed = len(status_map.get("FAILED", []))
 
         logging.info("\n--- Unfollowing Process Complete! ---")
         logging.info(f"Total accounts unfollowed in this session: {session_success}")
@@ -125,3 +114,9 @@ class UnfollowAgent(BaseAgent):
             logging.warning(
                 f"Failed to unfollow {session_failed} accounts. They will be retried on the next run."
             )
+
+        other_statuses = [
+            status for status in status_map if status not in ("SUCCESS", "FAILED")
+        ]
+        for status in other_statuses:
+            logging.info(f"Accounts with status '{status}': {len(status_map[status])}")
