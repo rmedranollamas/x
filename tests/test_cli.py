@@ -31,7 +31,9 @@ def test_unblock_command(mock_x_service, mock_agents):
             result = runner.invoke(app, ["unblock"])
 
             assert result.exit_code == 0
-            mock_unblock_cls.assert_called_once()
+            mock_unblock_cls.assert_called_once_with(
+                mock_x_service.return_value, user_id=None
+            )
             mock_run.assert_called_once()
 
 
