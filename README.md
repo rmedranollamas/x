@@ -65,6 +65,11 @@ Use the `x-agent` command followed by the agent you want to run.
     uv run x-agent unblock --user-id 123456789
     ```
 
+*   **Unfollow:** Manages your following list. By default, it targets accounts that do not follow you back.
+    ```bash
+    uv run x-agent unfollow
+    ```
+
 *   **Insights:** Gathers and reports daily follower/following metrics.
     ```bash
     uv run x-agent insights

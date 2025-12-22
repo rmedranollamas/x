@@ -10,6 +10,7 @@ Python CLI framework for X (Twitter) account management via modular agents.
     - `unblock`: Mass unblocks accounts with ghost/zombie protection.
     - `insights`: Tracks daily follower/following metrics.
     - `blocked-ids`: Lists all currently blocked IDs.
+    - `unfollow`: Mass unfollows accounts (e.g., non-followers).
 - **Persistence:** SQLite database (`.state/insights.db`) stores metrics and task statuses.
 - **CLI:** `Typer`-based entry point (`x-agent`).
 
