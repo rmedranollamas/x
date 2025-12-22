@@ -49,7 +49,7 @@ class UnblockAgent(BaseAgent):
         logging.info("Fetching latest blocked IDs from the API to sync...")
         api_blocked_ids = self.x_service.get_blocked_user_ids()
 
-        logging.info(f"[DEBUG] API returned {len(api_blocked_ids)} blocked IDs.")
+        logging.debug(f"API returned {len(api_blocked_ids)} blocked IDs.")
 
         if api_blocked_ids:
             logging.info("[DEBUG] Entering API sync block. Using API list as queue.")
