@@ -51,7 +51,9 @@ class InsightsAgent(BaseAgent):
         self._generate_report(current_followers, current_following, latest_insight)
 
         # Save the new metrics to the database
-        await asyncio.to_thread(database.add_insight, current_followers, current_following)
+        await asyncio.to_thread(
+            database.add_insight, current_followers, current_following
+        )
 
         logging.info("Insights agent finished successfully.")
 
@@ -59,7 +61,7 @@ class InsightsAgent(BaseAgent):
         self,
         current_followers: int,
         current_following: int,
-        latest_insight: Optional["Row"] = None,
+        latest_insight: Optional[dict] = None,
     ) -> None:
         """
         Generates and prints a report comparing current and previous metrics.

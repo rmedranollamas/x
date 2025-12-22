@@ -7,6 +7,7 @@ from .services.x_service import XService
 from .agents.unblock_agent import UnblockAgent
 from .agents.insights_agent import InsightsAgent
 from .agents.blocked_ids_agent import BlockedIdsAgent
+from .agents.unfollow_agent import UnfollowAgent
 from .logging_setup import setup_logging
 
 app = typer.Typer(
@@ -55,6 +56,21 @@ def insights(
     Run the insights agent to gather and report account metrics.
     """
     _run_agent(InsightsAgent, debug)
+
+
+@app.command()
+def unfollow(
+    non_followers: bool = typer.Option(
+        True, help="Only unfollow users who don't follow you back."
+    ),
+    debug: bool = typer.Option(
+        False, "--debug", help="Enable debug logging for detailed output."
+    ),
+):
+    """
+    Run the unfollow agent to clean up your following list.
+    """
+    _run_agent(UnfollowAgent, debug, non_followers_only=non_followers)
 
 
 @app.command(name="blocked-ids")
