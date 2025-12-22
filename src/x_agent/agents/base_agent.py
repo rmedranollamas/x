@@ -8,7 +8,7 @@ class BaseAgent(ABC):
     """
 
     @abstractmethod
-    def execute(self):
+    async def execute(self):
         """
         The main entry point for the agent's logic.
         This method must be implemented by all subclasses.

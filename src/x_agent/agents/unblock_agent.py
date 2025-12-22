@@ -1,4 +1,5 @@
 import logging
+import asyncio
 from .base_agent import BaseAgent
 from ..services.x_service import XService
 from .. import database
@@ -23,109 +24,67 @@ class UnblockAgent(BaseAgent):
         if self.user_id is not None and not isinstance(self.user_id, int):
             raise TypeError("User ID must be an integer")
 
-    def execute(self) -> None:
+    async def execute(self) -> None:
         """
         Executes the main logic of the agent.
 
-        Fetches the list of blocked users, compares it with already unblocked
-        users, and unblocks the remaining accounts.
+        Fetches the list of blocked users, stores them in the DB, and unblocks them.
         """
-        # If a specific user_id is provided, override the default behavior
+        # Specific user_id override
         if self.user_id is not None:
             logging.info(f"Attempting to unblock specific user ID: {self.user_id}")
-            ids_to_unblock = [self.user_id]
-            total_blocked_count = 1  # Only one user to unblock
-            already_unblocked_count = 0  # Assume not unblocked for this specific case
-            self._unblock_user_ids(
-                ids_to_unblock, total_blocked_count, already_unblocked_count
-            )
+            status = await self.x_service.unblock_user(self.user_id)
+            if status == "SUCCESS":
+                logging.info(f"Successfully unblocked {self.user_id}.")
+            else:
+                logging.error(f"Failed to unblock {self.user_id}: {status}")
             return
 
-        # Original logic for unblocking all users
-        logging.info("--- X Unblock Agent ---")
+        logging.info("--- X Unblock Agent (Async) ---")
         database.initialize_database()
 
         # --- State Loading and Resumption Logic ---
-        logging.info("Fetching latest blocked IDs from the API to sync...")
-        api_blocked_ids = self.x_service.get_blocked_user_ids()
+        total_blocked_count = database.get_all_blocked_users_count()
 
-        logging.debug(f"API returned {len(api_blocked_ids)} blocked IDs.")
-
-        if api_blocked_ids:
-            logging.info("[DEBUG] Entering API sync block. Using API list as queue.")
-            database.add_blocked_ids_to_db(set(api_blocked_ids))
+        if total_blocked_count == 0:
             logging.info(
-                f"Synced {len(api_blocked_ids)} blocked IDs from API to database."
+                "No local cache of blocked IDs found. Fetching from the API..."
             )
-
-            # Restore Ghost Block Protection:
-            # Filter out IDs that are already marked as unblocked in our local DB.
-            # This prevents infinite loops on "Ghost Blocks" (IDs that Twitter returns as blocked
-            # but return 404 when we try to unblock them).
-            completed_ids = database.get_unblocked_ids_from_db()
-            already_unblocked_count = len(completed_ids)
-
-            ids_to_unblock = [
-                uid for uid in api_blocked_ids if uid not in completed_ids
-            ]
-            ids_to_unblock.sort()
-
-            skipped_count = len(api_blocked_ids) - len(ids_to_unblock)
-            if skipped_count > 0:
-                logging.info(
-                    f"Skipping {skipped_count} IDs that are already marked as unblocked locally (Ghost Blocks protection)."
-                )
-
-            total_count = len(ids_to_unblock) + already_unblocked_count
-
-        else:
-            logging.info("No blocked IDs returned from the API.")
-            # Fallback to DB if API returned nothing (and didn't crash).
-            # This path is rare given XService implementation but good for safety.
-            all_blocked_ids = list(database.get_all_blocked_ids_from_db())
-
-            if not all_blocked_ids:
-                logging.info("No blocked IDs found in database or API. Nothing to do.")
+            all_blocked_ids = await self.x_service.get_blocked_user_ids()
+            if all_blocked_ids:
+                database.add_blocked_users(all_blocked_ids)
+                total_blocked_count = len(all_blocked_ids)
+                logging.info(f"Saved {total_blocked_count} blocked IDs to database.")
+            else:
+                logging.info("No blocked IDs found from the API.")
                 return
+        else:
+            logging.info(f"Found {total_blocked_count} blocked IDs in database.")
 
-            completed_ids = database.get_unblocked_ids_from_db()
-            logging.info(
-                f"Loaded {len(completed_ids)} already unblocked IDs from the database."
-            )
+        pending_ids = database.get_pending_blocked_users()
+        processed_count = database.get_processed_users_count()
 
-            # In fallback mode, we must filter, otherwise we'd loop forever on the DB list.
-            ids_to_unblock = [
-                uid for uid in all_blocked_ids if uid not in completed_ids
-            ]
-            # Sort ascending here as well for consistency
-            ids_to_unblock.sort()
-            total_count = len(all_blocked_ids)
-            already_unblocked_count = len(completed_ids)
+        logging.info(
+            f"Already processed: {processed_count}. Remaining to unblock: {len(pending_ids)}."
+        )
 
-        logging.info(f"[DEBUG] Final ids_to_unblock count: {len(ids_to_unblock)}")
-
-        if not ids_to_unblock:
+        if not pending_ids:
             logging.info(
                 "All accounts from the list have been unblocked. Nothing to do!"
             )
             return
 
         # --- Unblocking Process ---
-        self._unblock_user_ids(ids_to_unblock, total_count, already_unblocked_count)
+        await self._unblock_user_ids(pending_ids, total_blocked_count, processed_count)
 
-    def _unblock_user_ids(
+    async def _unblock_user_ids(
         self,
         ids_to_unblock: list[int],
         total_blocked_count: int,
         already_unblocked_count: int,
     ) -> None:
         """
-        Iterates through a list of user IDs and unblocks each one.
-
-        Args:
-            ids_to_unblock: A list of user IDs to unblock (ordered).
-            total_blocked_count: The total number of users who were blocked.
-            already_unblocked_count: The number of users already unblocked.
+        Iterates through a list of user IDs and unblocks each one concurrently.
         """
         total_to_unblock_session = len(ids_to_unblock)
         logging.info(
@@ -133,41 +92,42 @@ class UnblockAgent(BaseAgent):
         )
 
         session_unblocked_count = 0
-        failed_ids = []
+        failed_count = 0
 
-        for user_id in ids_to_unblock:
-            result = self.x_service.unblock_user(user_id)
+        # Limit concurrency
+        sem = asyncio.Semaphore(20)
 
-            # unblock_user returns True on success, "NOT_FOUND" for deleted users,
-            # and None for other errors.
-            if result == "NOT_FOUND":
-                # User not found, so we can consider the "unblocking" task for this ID complete.
-                database.mark_user_as_unblocked_in_db(user_id)
-                continue
+        async def unblock_worker(user_id):
+            nonlocal session_unblocked_count, failed_count
+            async with sem:
+                status = await self.x_service.unblock_user(user_id)
 
-            if result is None:
-                # A non-specific error occurred, which was logged by the service.
-                # We'll add it to the list of failures for this session and not mark it as complete,
-                # allowing it to be retried on the next run.
-                failed_ids.append(user_id)
-                continue
+                if status == "SUCCESS":
+                    database.update_user_status(user_id, "UNBLOCKED")
+                    session_unblocked_count += 1
 
-            session_unblocked_count += 1
-            database.mark_user_as_unblocked_in_db(user_id)
+                    processed_so_far = (
+                        already_unblocked_count + session_unblocked_count + failed_count
+                    )
+                    remaining = total_blocked_count - processed_so_far
+                    logging.info(
+                        f"Unblocked ID {user_id}. Remaining: ~{remaining}",
+                        extra={"single_line": True},
+                    )
 
-            total_unblocked = already_unblocked_count + session_unblocked_count
-            remaining = total_blocked_count - total_unblocked
+                elif status == "NOT_FOUND":
+                    database.update_user_status(user_id, "NOT_FOUND")
+                    failed_count += 1
+                    logging.debug(f"User {user_id} not found (possibly deleted).")
+                else:
+                    database.update_user_status(user_id, "FAILED")
+                    failed_count += 1
+                    logging.warning(f"Failed to unblock {user_id}.")
 
-            logging.info(
-                f"({total_unblocked}/{total_blocked_count}) Successfully unblocked ID: {user_id}. Remaining: {remaining}."
-            )
+        tasks = [unblock_worker(uid) for uid in ids_to_unblock]
+        await asyncio.gather(*tasks)
 
-        logging.info("--- Unblocking Process Complete! ---")
+        logging.info("\n--- Unblocking Process Complete! ---")
         logging.info(
             f"Total accounts unblocked in this session: {session_unblocked_count}"
         )
-        if failed_ids:
-            logging.warning(
-                f"Failed to unblock {len(failed_ids)} accounts. Check logs for details."
-            )
-            logging.warning(f"Failed IDs: {failed_ids}")

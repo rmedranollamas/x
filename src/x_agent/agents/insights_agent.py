@@ -9,28 +9,32 @@ class InsightsAgent(BaseAgent):
 
     agent_name = "insights"
 
-    def __init__(self, x_service: XService) -> None:
-        """
-        Initializes the agent with a service to interact with the X API.
-
-        Args:
-            x_service: An instance of XService.
-        """
+    def __init__(self, x_service: XService):
         self.x_service = x_service
 
-    def execute(self) -> None:
+    async def execute(self):
         """Runs the insights agent to generate and store the daily report."""
         logging.info("Starting the insights agent...")
+
         database.initialize_database()
 
-        # Get the latest metrics from the X API
-        me = self.x_service.get_me()
-        if not me or not me.public_metrics:
+        try:
+            # Ensure authentication
+            if not self.x_service.user_id:
+                await self.x_service.initialize()
+
+            response = await self.x_service.get_me()
+            me_data = response.data
+        except Exception as e:
+            logging.error(f"Could not retrieve user metrics: {e}")
+            return
+
+        if not me_data or not me_data.public_metrics:
             logging.error("Could not retrieve user metrics. Aborting.")
             return
 
-        current_followers = me.public_metrics.get("followers_count", 0)
-        current_following = me.public_metrics.get("following_count", 0)
+        current_followers = me_data.public_metrics.get("followers_count", 0)
+        current_following = me_data.public_metrics.get("following_count", 0)
 
         # Get the previous metrics from the database
         latest_insight = database.get_latest_insight()
