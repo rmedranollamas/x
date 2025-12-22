@@ -1,12 +1,15 @@
 import pytest
-from unittest.mock import MagicMock, patch, call
+import logging
+from unittest.mock import MagicMock, AsyncMock
 from src.x_agent.agents.blocked_ids_agent import BlockedIdsAgent
 from src.x_agent.services.x_service import XService
 
 
 @pytest.fixture
 def mock_x_service():
-    return MagicMock(spec=XService)
+    service = MagicMock(spec=XService)
+    service.get_blocked_user_ids = AsyncMock()
+    return service
 
 
 @pytest.fixture
@@ -14,24 +17,34 @@ def blocked_ids_agent(mock_x_service):
     return BlockedIdsAgent(mock_x_service)
 
 
-def test_execute_found_ids(blocked_ids_agent, mock_x_service):
-    """Test execution when blocked IDs are found."""
-    mock_x_service.get_blocked_user_ids.return_value = [123, 456]
+@pytest.mark.asyncio
+async def test_execute_success(blocked_ids_agent, mock_x_service, capsys, caplog):
+    """Test successful execution of the blocked IDs agent."""
+    mock_x_service.get_blocked_user_ids.return_value = {101, 102}
 
-    with patch("builtins.print") as mock_print:
-        blocked_ids_agent.execute()
+    with caplog.at_level(logging.INFO):
+        await blocked_ids_agent.execute()
 
-        mock_x_service.get_blocked_user_ids.assert_called_once()
-        assert mock_print.call_count == 2
-        mock_print.assert_has_calls([call(123), call(456)])
+    mock_x_service.get_blocked_user_ids.assert_awaited_once()
+
+    # Check log messages
+    assert "Found 2 blocked user IDs" in caplog.text
+
+    # Check printed IDs
+    captured = capsys.readouterr()
+    assert "101" in captured.out
+    assert "102" in captured.out
 
 
-def test_execute_no_ids(blocked_ids_agent, mock_x_service):
+@pytest.mark.asyncio
+async def test_execute_no_ids(blocked_ids_agent, mock_x_service, capsys, caplog):
     """Test execution when no blocked IDs are found."""
-    mock_x_service.get_blocked_user_ids.return_value = []
+    mock_x_service.get_blocked_user_ids.return_value = set()
 
-    with patch("builtins.print") as mock_print:
-        blocked_ids_agent.execute()
+    with caplog.at_level(logging.INFO):
+        await blocked_ids_agent.execute()
 
-        mock_x_service.get_blocked_user_ids.assert_called_once()
-        mock_print.assert_not_called()
+    mock_x_service.get_blocked_user_ids.assert_awaited_once()
+
+    # Check log message
+    assert "No blocked IDs found" in caplog.text

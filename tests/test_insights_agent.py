@@ -1,64 +1,67 @@
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, AsyncMock, patch
 from src.x_agent.agents.insights_agent import InsightsAgent
 from src.x_agent.services.x_service import XService
 
 
 @pytest.fixture
 def mock_x_service():
-    return MagicMock(spec=XService)
+    service = MagicMock(spec=XService)
+    service.user_id = 12345
+    service.get_me = AsyncMock()
+    service.initialize = AsyncMock()
+    return service
+
+
+@pytest.fixture
+def mock_database():
+    with patch("src.x_agent.agents.insights_agent.database") as mock_db:
+        yield mock_db
 
 
 @pytest.fixture
 def insights_agent(mock_x_service):
-    return InsightsAgent(mock_x_service)
+    return InsightsAgent(x_service=mock_x_service)
 
 
-def test_execute_success(insights_agent, mock_x_service):
-    """Test successful execution of the insights agent."""
-    # Mock API response
+@pytest.mark.asyncio
+async def test_execute_first_run(insights_agent, mock_x_service, mock_database, capsys):
+    """Test insights agent behavior on the first run (no previous data)."""
+    # Setup API response
     mock_me = MagicMock()
     mock_me.public_metrics = {"followers_count": 100, "following_count": 50}
-    mock_x_service.get_me.return_value = mock_me
+    mock_x_service.get_me.return_value = MagicMock(data=mock_me)
 
-    with patch("src.x_agent.agents.insights_agent.database") as mock_db:
-        # Mock database behavior
-        mock_db.get_latest_insight.return_value = {"followers": 90, "following": 45}
+    # No previous insight in DB
+    mock_database.get_latest_insight.return_value = None
 
-        # Run agent
-        insights_agent.execute()
+    await insights_agent.execute()
 
-        # Verify interactions
-        mock_db.initialize_database.assert_called_once()
-        mock_x_service.get_me.assert_called_once()
-        mock_db.get_latest_insight.assert_called_once()
-        mock_db.add_insight.assert_called_once_with(100, 50)
+    mock_database.initialize_database.assert_called_once()
+    mock_database.add_insight.assert_called_once_with(100, 50)
 
-
-def test_execute_no_metrics(insights_agent, mock_x_service):
-    """Test execution when user metrics cannot be retrieved."""
-    mock_x_service.get_me.return_value = None
-
-    with patch("src.x_agent.agents.insights_agent.database") as mock_db:
-        insights_agent.execute()
-
-        mock_db.initialize_database.assert_called_once()
-        mock_x_service.get_me.assert_called_once()
-        mock_db.add_insight.assert_not_called()
+    captured = capsys.readouterr()
+    assert "Followers: 100 (First run)" in captured.out
+    assert "Following: 50 (First run)" in captured.out
 
 
-def test_execute_first_run(insights_agent, mock_x_service):
-    """Test execution when there are no previous insights."""
+@pytest.mark.asyncio
+async def test_execute_with_previous_data(
+    insights_agent, mock_x_service, mock_database, capsys
+):
+    """Test insights agent behavior when comparing with previous data."""
+    # Current metrics
     mock_me = MagicMock()
-    mock_me.public_metrics = {"followers_count": 100, "following_count": 50}
-    mock_x_service.get_me.return_value = mock_me
+    mock_me.public_metrics = {"followers_count": 110, "following_count": 45}
+    mock_x_service.get_me.return_value = MagicMock(data=mock_me)
 
-    with patch("src.x_agent.agents.insights_agent.database") as mock_db:
-        mock_db.get_latest_insight.return_value = None
+    # Previous metrics in DB
+    mock_database.get_latest_insight.return_value = {"followers": 100, "following": 50}
 
-        with patch("builtins.print") as mock_print:
-            insights_agent.execute()
+    await insights_agent.execute()
 
-            mock_db.add_insight.assert_called_once_with(100, 50)
-            # Check if print was called (verifying report generation)
-            assert mock_print.called
+    mock_database.add_insight.assert_called_once_with(110, 45)
+
+    captured = capsys.readouterr()
+    assert "Followers: 110 (+10)" in captured.out
+    assert "Following: 45 (-5)" in captured.out

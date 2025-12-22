@@ -1,7 +1,7 @@
 import sqlite3
 import logging
 from pathlib import Path
-
+from typing import List, Optional
 from contextlib import contextmanager
 
 STATE_DIR = Path(".state")
@@ -10,41 +10,31 @@ DB_FILE = STATE_DIR / "insights.db"
 
 @contextmanager
 def db_transaction():
-    """Generator-based context manager for database transactions."""
-    conn = None
-    try:
-        STATE_DIR.mkdir(exist_ok=True)
-        conn = sqlite3.connect(DB_FILE)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        yield cursor
-        conn.commit()
-    except sqlite3.Error as e:
-        logging.error(f"Database error: {e}")
-        if conn:
-            conn.rollback()
-        # Re-raise the exception to be handled by the caller
-        raise
-    finally:
-        if conn:
-            conn.close()
-
-
-def get_db_connection():
-    """Establishes a connection to the SQLite database."""
+    """
+    Context manager for database transactions.
+    Ensures the connection is opened, committed, and closed correctly.
+    """
     STATE_DIR.mkdir(exist_ok=True)
     conn = sqlite3.connect(DB_FILE)
     conn.row_factory = sqlite3.Row
-    return conn
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
-def initialize_database():
-    """Initializes the database with the required schema."""
-    with db_transaction() as cursor:
+def initialize_database() -> None:
+    """Initializes the database with the required schema and handles migrations."""
+    with db_transaction() as conn:
+        cursor = conn.cursor()
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS insights (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                timestamp DATETIME DEFAULT (STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW')),
                 followers INTEGER,
                 following INTEGER
             )
@@ -52,15 +42,40 @@ def initialize_database():
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS blocked_users (
                 user_id INTEGER PRIMARY KEY,
-                unblocked_at DATETIME
+                status TEXT DEFAULT 'PENDING',
+                updated_at DATETIME DEFAULT (STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW'))
             )
         """)
+
+        # Migration logic
+        cursor.execute("PRAGMA table_info(blocked_users)")
+        columns = [row["name"] for row in cursor.fetchall()]
+        if "status" not in columns:
+            logging.info("Migrating blocked_users table: adding 'status' column.")
+            cursor.execute(
+                "ALTER TABLE blocked_users ADD COLUMN status TEXT DEFAULT 'PENDING'"
+            )
+        if "updated_at" not in columns:
+            logging.info("Migrating blocked_users table: adding 'updated_at' column.")
+            cursor.execute("ALTER TABLE blocked_users ADD COLUMN updated_at DATETIME")
+            cursor.execute(
+                "UPDATE blocked_users SET updated_at = (STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW')) WHERE updated_at IS NULL"
+            )
+
+        if "unblocked_at" in columns:
+            logging.info("Migrating legacy data from 'unblocked_at' to 'status'.")
+            cursor.execute(
+                "UPDATE blocked_users SET status = 'UNBLOCKED' WHERE unblocked_at IS NOT NULL AND status = 'PENDING'"
+            )
+            cursor.execute("UPDATE blocked_users SET unblocked_at = NULL")
+
     logging.info("Database initialized successfully.")
 
 
-def add_insight(followers, following):
+def add_insight(followers: int, following: int) -> None:
     """Adds a new insight record to the database."""
-    with db_transaction() as cursor:
+    with db_transaction() as conn:
+        cursor = conn.cursor()
         cursor.execute(
             "INSERT INTO insights (followers, following) VALUES (?, ?)",
             (followers, following),
@@ -68,63 +83,73 @@ def add_insight(followers, following):
     logging.info(f"Added new insight: {followers} followers, {following} following.")
 
 
-def get_latest_insight():
+def get_latest_insight() -> Optional[sqlite3.Row]:
     """Retrieves the most recent insight from the database."""
-    with db_transaction() as cursor:
-        cursor.execute("SELECT * FROM insights ORDER BY timestamp DESC LIMIT 1")
+    with db_transaction() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM insights ORDER BY timestamp DESC, id DESC LIMIT 1"
+        )
         return cursor.fetchone()
 
 
-def add_blocked_ids_to_db(user_ids: set[int]) -> None:
-    """
-    Adds a set of blocked user IDs to the database, ignoring duplicates.
-    """
-    with db_transaction() as cursor:
-        data = [(user_id,) for user_id in user_ids]
+def add_blocked_users(user_ids: set[int]) -> None:
+    """Adds a set of blocked user IDs to the database."""
+    if not user_ids:
+        return
+    with db_transaction() as conn:
+        cursor = conn.cursor()
+        data = [(uid, "PENDING") for uid in user_ids]
         cursor.executemany(
-            "INSERT OR IGNORE INTO blocked_users (user_id) VALUES (?)", data
+            "INSERT OR IGNORE INTO blocked_users (user_id, status) VALUES (?, ?)", data
         )
-    logging.info(f"Cached {len(user_ids)} blocked IDs to the database.")
 
 
-def get_all_blocked_ids_from_db() -> set[int]:
-    """
-    Retrieves the complete set of user IDs from the blocked_users table.
-    """
-    with db_transaction() as cursor:
-        cursor.execute("SELECT user_id FROM blocked_users")
-        rows = cursor.fetchall()
-        return {row["user_id"] for row in rows}
-
-
-def mark_user_as_unblocked_in_db(user_id: int) -> None:
-    """
-    Marks a user as unblocked by setting the unblocked_at timestamp.
-    """
-    with db_transaction() as cursor:
+def get_pending_blocked_users() -> List[int]:
+    """Retrieves all user IDs with status 'PENDING' or 'FAILED'."""
+    with db_transaction() as conn:
+        cursor = conn.cursor()
         cursor.execute(
-            "UPDATE blocked_users SET unblocked_at = CURRENT_TIMESTAMP WHERE user_id = ?",
-            (user_id,),
+            "SELECT user_id FROM blocked_users WHERE status IN ('PENDING', 'FAILED')"
         )
+        rows = cursor.fetchall()
+        return [row["user_id"] for row in rows]
 
 
-def get_unblocked_ids_from_db() -> set[int]:
-    """
-    Retrieves the set of user IDs that have been marked as unblocked.
-    """
-    with db_transaction() as cursor:
+def get_all_blocked_users_count() -> int:
+    """Returns the total number of users in the blocked_users table."""
+    with db_transaction() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM blocked_users")
+        return cursor.fetchone()[0]
+
+
+def get_processed_users_count() -> int:
+    """Returns the number of users that have been processed (not PENDING)."""
+    with db_transaction() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM blocked_users WHERE status != 'PENDING'")
+        return cursor.fetchone()[0]
+
+
+def update_user_status(user_id: int, status: str) -> None:
+    """Updates the status of a specific user."""
+    with db_transaction() as conn:
+        cursor = conn.cursor()
         cursor.execute(
-            "SELECT user_id FROM blocked_users WHERE unblocked_at IS NOT NULL"
+            "UPDATE blocked_users SET status = ?, updated_at = (STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW')) WHERE user_id = ?",
+            (status, user_id),
         )
-        rows = cursor.fetchall()
-        return {row["user_id"] for row in rows}
 
 
-def get_ids_to_unblock_from_db() -> set[int]:
-    """
-    Retrieves the set of user IDs that have not yet been unblocked.
-    """
-    with db_transaction() as cursor:
-        cursor.execute("SELECT user_id FROM blocked_users WHERE unblocked_at IS NULL")
-        rows = cursor.fetchall()
-        return {row["user_id"] for row in rows}
+def update_user_statuses(user_ids: List[int], status: str) -> None:
+    """Batch updates the status of multiple users."""
+    if not user_ids:
+        return
+    with db_transaction() as conn:
+        cursor = conn.cursor()
+        data = [(status, uid) for uid in user_ids]
+        cursor.executemany(
+            "UPDATE blocked_users SET status = ?, updated_at = (STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW')) WHERE user_id = ?",
+            data,
+        )

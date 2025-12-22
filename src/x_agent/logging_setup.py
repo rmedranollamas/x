@@ -23,29 +23,38 @@ class SingleLineUpdateHandler(logging.StreamHandler):
         Args:
             record: The log record to emit.
         """
-        message = self.format(record)
-        if hasattr(record, "single_line"):
-            # Clear the previous line if necessary
-            if self._last_single_line_length > len(message):
-                print(
-                    " " * self._last_single_line_length,
-                    end="\r",
-                    file=sys.stdout,
-                    flush=True,
-                )
-            print(f"\r{message}", end="", file=sys.stdout, flush=True)
-            self._last_single_line_length = len(message)
-        else:
-            # If a non-single-line record comes, clear any active single-line message
-            if self._last_single_line_length > 0:
-                print(
-                    " " * self._last_single_line_length,
-                    end="\r",
-                    file=sys.stdout,
-                    flush=True,
-                )
-                self._last_single_line_length = 0
-            print(message, file=self.stream, flush=True)
+        try:
+            if self.stream is None or (
+                hasattr(self.stream, "closed") and self.stream.closed
+            ):
+                return
+
+            message = self.format(record)
+            if hasattr(record, "single_line"):
+                # Clear the previous line if necessary
+                if self._last_single_line_length > len(message):
+                    print(
+                        " " * self._last_single_line_length,
+                        end="\r",
+                        file=self.stream,
+                        flush=True,
+                    )
+                print(f"\r{message}", end="", file=self.stream, flush=True)
+                self._last_single_line_length = len(message)
+            else:
+                # If a non-single-line record comes, clear any active single-line message
+                if self._last_single_line_length > 0:
+                    print(
+                        " " * self._last_single_line_length,
+                        end="\r",
+                        file=self.stream,
+                        flush=True,
+                    )
+                    self._last_single_line_length = 0
+                print(message, file=self.stream, flush=True)
+        except (ValueError, RuntimeError, AttributeError):
+            # Fallback for closed streams during tests/shutdown
+            pass
 
 
 def setup_logging(debug: bool = False) -> None:

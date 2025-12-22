@@ -17,14 +17,14 @@ class BlockedIdsAgent(BaseAgent):
         """
         self.x_service = x_service
 
-    def execute(self) -> None:
+    async def execute(self) -> None:
         """
         Executes the main logic of the agent.
 
         Fetches the list of blocked users and prints the user IDs to the console.
         """
         logging.info("--- X Blocked IDs Agent ---")
-        api_blocked_ids = self.x_service.get_blocked_user_ids()
+        api_blocked_ids = await self.x_service.get_blocked_user_ids()
         if api_blocked_ids:
             logging.info(f"Found {len(api_blocked_ids)} blocked user IDs:")
             for user_id in api_blocked_ids:
