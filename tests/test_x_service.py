@@ -35,6 +35,9 @@ def mock_api_v1():
     api.destroy_block = MagicMock()
     api.get_user = MagicMock()
     api.create_block = MagicMock()
+    api.get_friend_ids.return_value = ([], (None, 0))
+    api.get_follower_ids.return_value = ([], (None, 0))
+    api.destroy_friendship = MagicMock()
     return api
 
 
@@ -145,3 +148,34 @@ async def test_unblock_user_failure(x_service, mock_api_v1):
     result = await x_service.unblock_user(999)
 
     assert result == "FAILED"
+
+
+@pytest.mark.asyncio
+async def test_get_following_user_ids(x_service, mock_api_v1):
+    """Test fetching following IDs using v1.1 API."""
+    mock_api_v1.get_friend_ids.return_value = ([201, 202], (None, 0))
+
+    ids = await x_service.get_following_user_ids()
+
+    assert ids == {201, 202}
+    mock_api_v1.get_friend_ids.assert_called_once_with(cursor=-1)
+
+
+@pytest.mark.asyncio
+async def test_get_follower_user_ids(x_service, mock_api_v1):
+    """Test fetching follower IDs using v1.1 API."""
+    mock_api_v1.get_follower_ids.return_value = ([301, 302], (None, 0))
+
+    ids = await x_service.get_follower_user_ids()
+
+    assert ids == {301, 302}
+    mock_api_v1.get_follower_ids.assert_called_once_with(cursor=-1)
+
+
+@pytest.mark.asyncio
+async def test_unfollow_user_success(x_service, mock_api_v1):
+    """Test unfollow_user success."""
+    result = await x_service.unfollow_user(888)
+
+    mock_api_v1.destroy_friendship.assert_called_once_with(user_id=888)
+    assert result == "SUCCESS"

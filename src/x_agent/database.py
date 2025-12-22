@@ -46,6 +46,13 @@ def initialize_database() -> None:
                 updated_at DATETIME DEFAULT (STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW'))
             )
         """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS following_users (
+                user_id INTEGER PRIMARY KEY,
+                status TEXT DEFAULT 'PENDING',
+                updated_at DATETIME DEFAULT (STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW'))
+            )
+        """)
 
         # Migration logic
         cursor.execute("PRAGMA table_info(blocked_users)")
@@ -151,5 +158,58 @@ def update_user_statuses(user_ids: List[int], status: str) -> None:
         data = [(status, uid) for uid in user_ids]
         cursor.executemany(
             "UPDATE blocked_users SET status = ?, updated_at = (STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW')) WHERE user_id = ?",
+            data,
+        )
+
+
+def add_following_users(user_ids: set[int]) -> None:
+    """Adds a set of followed user IDs to the database."""
+    if not user_ids:
+        return
+    with db_transaction() as conn:
+        cursor = conn.cursor()
+        data = [(uid, "PENDING") for uid in user_ids]
+        cursor.executemany(
+            "INSERT OR IGNORE INTO following_users (user_id, status) VALUES (?, ?)",
+            data,
+        )
+
+
+def get_pending_following_users() -> List[int]:
+    """Retrieves all user IDs from following_users with status 'PENDING' or 'FAILED'."""
+    with db_transaction() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT user_id FROM following_users WHERE status IN ('PENDING', 'FAILED')"
+        )
+        rows = cursor.fetchall()
+        return [row["user_id"] for row in rows]
+
+
+def get_all_following_users_count() -> int:
+    """Returns the total number of users in the following_users table."""
+    with db_transaction() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM following_users")
+        return cursor.fetchone()[0]
+
+
+def get_processed_following_count() -> int:
+    """Returns the number of followed users that have been processed."""
+    with db_transaction() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM following_users WHERE status != 'PENDING'")
+        return cursor.fetchone()[0]
+
+
+def update_following_status(user_ids: List[int], status: str) -> None:
+    """Batch updates the status of multiple following users."""
+    if not user_ids:
+        return
+    with db_transaction() as conn:
+        cursor = conn.cursor()
+        data = [(status, uid) for uid in user_ids]
+        cursor.executemany(
+            "UPDATE following_users SET status = ?, updated_at = (STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW')) WHERE user_id = ?",
             data,
         )

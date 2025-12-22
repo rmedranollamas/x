@@ -103,7 +103,9 @@ class XService:
             await self.client.unblock(target_user_id=user_id)
             return "SUCCESS"
         except tweepy.errors.NotFound as e:
-            logging.warning(f"V2 Unblock ALSO returned 404 for {user_id}. API says: {e}")
+            logging.warning(
+                f"V2 Unblock ALSO returned 404 for {user_id}. API says: {e}"
+            )
         except Exception as e:
             logging.warning(f"V2 Unblock failed for {user_id}: {e}")
 
@@ -135,7 +137,9 @@ class XService:
             if await self._check_user_exists_v1(user_id):
                 return await self._handle_zombie_recovery(user_id)
             else:
-                logging.warning(f"User ID {user_id} confirmed missing. Skipping (Ghost Block).")
+                logging.warning(
+                    f"User ID {user_id} confirmed missing. Skipping (Ghost Block)."
+                )
                 return "NOT_FOUND"
         except Exception as e:
             logging.warning(f"Failed to unblock {user_id}: {e}")
@@ -144,3 +148,75 @@ class XService:
     async def get_me(self) -> tweepy.Response:
         """Retrieves the authenticated user's information."""
         return await self.client.get_me(user_fields=["public_metrics"])
+
+    async def get_following_user_ids(self) -> set[int]:
+        """
+        Fetches the complete list of user IDs that the authenticated user follows.
+        Uses v1.1 API.
+        """
+        logging.info("Fetching following account IDs via v1.1 API...")
+        following_ids = set()
+        cursor = -1
+
+        try:
+            while cursor != 0:
+                ids, (_, next_cursor) = await asyncio.to_thread(
+                    self.api_v1.get_friend_ids, cursor=cursor
+                )
+                following_ids.update(ids)
+                cursor = next_cursor
+                if len(following_ids) % 1000 == 0 or cursor == 0:
+                    logging.info(
+                        f"Fetched {len(following_ids)} IDs...",
+                        extra={"single_line": True},
+                    )
+        except Exception as e:
+            logging.error(f"Error fetching following IDs: {e}", exc_info=True)
+            raise
+
+        logging.info(
+            f"Finished fetching. Found a total of {len(following_ids)} following account IDs."
+        )
+        return following_ids
+
+    async def get_follower_user_ids(self) -> set[int]:
+        """
+        Fetches the complete list of user IDs that follow the authenticated user.
+        Uses v1.1 API.
+        """
+        logging.info("Fetching follower account IDs via v1.1 API...")
+        follower_ids = set()
+        cursor = -1
+
+        try:
+            while cursor != 0:
+                ids, (_, next_cursor) = await asyncio.to_thread(
+                    self.api_v1.get_follower_ids, cursor=cursor
+                )
+                follower_ids.update(ids)
+                cursor = next_cursor
+                if len(follower_ids) % 1000 == 0 or cursor == 0:
+                    logging.info(
+                        f"Fetched {len(follower_ids)} IDs...",
+                        extra={"single_line": True},
+                    )
+        except Exception as e:
+            logging.error(f"Error fetching follower IDs: {e}", exc_info=True)
+            raise
+
+        logging.info(
+            f"Finished fetching. Found a total of {len(follower_ids)} follower account IDs."
+        )
+        return follower_ids
+
+    async def unfollow_user(self, user_id: int) -> str:
+        """
+        Unfollows a user using v1.1 API.
+        Returns "SUCCESS" or "FAILED".
+        """
+        try:
+            await asyncio.to_thread(self.api_v1.destroy_friendship, user_id=user_id)
+            return "SUCCESS"
+        except Exception as e:
+            logging.warning(f"Failed to unfollow {user_id}: {e}")
+            return "FAILED"

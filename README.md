@@ -1,16 +1,17 @@
 # X Agent Framework
 
-This is a command-line tool to manage your X (formerly Twitter) account using a collection of specialized agents. The first available agent is the `unblock` agent, which unblocks every account you have blocked.
+This is a command-line tool to manage your X (formerly Twitter) account using a collection of specialized agents.
 
-The framework is designed to be extensible, allowing for the easy addition of new agents to perform various tasks on your X profile. It uses the X API, automatically handles rate limiting, gracefully skips over accounts that no longer exist, and saves progress for resumable operations.
+The framework is designed to be extensible, allowing for the easy addition of new agents to perform various tasks on your X profile. It uses the X API, automatically handles rate limiting, and saves progress in a local SQLite database for resumable operations.
 
 ## Features
 
 *   **Extensible:** Easily add new agents for different tasks.
-*   **Resumable:** The `unblock` agent saves its progress. You can stop it at any time and restart it later without losing your place.
-*   **Rate Limit Handling:** Automatically pauses and resumes when it hits the X API rate limit.
-*   **Robust:** If it encounters an account that has been deleted or suspended, it logs the issue and continues.
-*   **Informative Logging:** Provides a running count of actions, the username of the last person interacted with, and the total number remaining.
+*   **Asynchronous:** Uses `asyncio` for concurrent API interactions.
+*   **Resumable:** Progress is saved in an SQLite database. You can stop and restart at any time without losing your place.
+*   **Rate Limit Handling:** Automatically handles X API rate limits with built-in wait-and-resume logic.
+*   **Robust:** Gracefully handles deleted, suspended, or missing accounts.
+*   **Modern CLI:** Built with `Typer` for an intuitive command-line experience.
 
 ## Requirements
 
@@ -32,9 +33,9 @@ The framework is designed to be extensible, allowing for the easy addition of ne
     ```
 
 3.  **Install Dependencies:**
-    Install the project in editable mode. This allows you to run the script from anywhere and ensures any changes you make are immediately available.
+    Install the project and synchronize the environment:
     ```bash
-    uv pip install -e .
+    uv sync
     ```
 
 4.  **Set Up Your Credentials:**
@@ -51,20 +52,41 @@ The framework is designed to be extensible, allowing for the easy addition of ne
 
 ## How to Run
 
-Once you have completed the setup, you can run the tool using the `x-agent` command followed by the name of the agent you want to use.
+Use the `x-agent` command followed by the agent you want to run.
 
-To run the unblocker agent:
+### Available Agents
+
+*   **Unblocker:** Unblocks all blocked accounts.
+    ```bash
+    uv run x-agent unblock
+    ```
+    To unblock a specific user ID:
+    ```bash
+    uv run x-agent unblock --user-id 123456789
+    ```
+
+*   **Insights:** Gathers and reports daily follower/following metrics.
+    ```bash
+    uv run x-agent insights
+    ```
+
+*   **Blocked IDs:** Lists all currently blocked user IDs.
+    ```bash
+    uv run x-agent blocked-ids
+    ```
+
+### Global Options
+
+Use `--debug` with any command for detailed logging:
 ```bash
-uv run x-agent unblock
+uv run x-agent unblock --debug
 ```
 
-The script will then:
-1.  Authenticate with your credentials.
-2.  Fetch the complete list of all your blocked accounts and save them to `blocked_ids.txt`.
-3.  Begin the unblocking process, saving the ID of each unblocked user to `unblocked_ids.txt`.
-
-If you stop the script and run it again, it will read both files and resume where it left off.
+For more information, use the `--help` flag:
+```bash
+uv run x-agent --help
+```
 
 ### Important Note on Execution Time
 
-The X API has strict rate limits. The script automatically handles these by pausing when necessary. Please be patient, as the process can take a long time if you have blocked many accounts. For example, unblocking 1,000 accounts will take approximately **5 hours**. The script is designed to run unattended until it completes.
+The X API has strict rate limits. The script automatically handles these by pausing when necessary. For mass unblocking, please be patient as the process can take several hours depending on the number of accounts. The script is designed to run unattended until completion.
