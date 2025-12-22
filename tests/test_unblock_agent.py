@@ -26,6 +26,23 @@ def unblock_agent(mock_x_service):
     return UnblockAgent(x_service=mock_x_service)
 
 
+def test_unblock_agent_init_with_invalid_user_id_type(mock_x_service):
+    """
+    Test that UnblockAgent's __init__ method raises TypeError when user_id is not an integer.
+    """
+    # Test with a string user_id
+    with pytest.raises(TypeError, match="User ID must be an integer"):
+        UnblockAgent(x_service=mock_x_service, user_id="invalid")
+
+    # Test with a float user_id
+    with pytest.raises(TypeError, match="User ID must be an integer"):
+        UnblockAgent(x_service=mock_x_service, user_id=123.45)
+
+    # Test with a list user_id
+    with pytest.raises(TypeError, match="User ID must be an integer"):
+        UnblockAgent(x_service=mock_x_service, user_id=[123])
+
+
 @pytest.mark.asyncio
 async def test_execute_empty_db_fetches_from_api(
     unblock_agent, mock_x_service, mock_database

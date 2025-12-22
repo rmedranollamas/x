@@ -2,23 +2,34 @@
 
 ## Project Overview
 Python CLI framework for X (Twitter) account management via modular agents.
-Current agent: `unblock` (unblocks blocked accounts, resumable, rate-limit aware).
-Architecture: `XService` (API interaction), `BaseAgent` (interface), concrete agents (task logic), `cli.py` (entry point).
+
+## Architecture
+- **XService:** Central service for all X API interactions (v1.1 and v2). Uses `tweepy.asynchronous` where possible.
+- **BaseAgent:** Abstract base class for all agents.
+- **Agents:**
+    - `unblock`: Mass unblocks accounts with ghost/zombie protection.
+    - `insights`: Tracks daily follower/following metrics.
+    - `blocked-ids`: Lists all currently blocked IDs.
+- **Persistence:** SQLite database (`.state/insights.db`) stores metrics and task statuses.
+- **CLI:** `Typer`-based entry point (`x-agent`).
 
 ## Key Technologies
-- Python (uv for dependency management)
-- tweepy (X API interaction)
-- python-dotenv (credential management)
+- Python 3.13+
+- `tweepy` & `tweepy.asynchronous`
+- `typer` (CLI)
+- `pydantic-settings` (Configuration)
+- `sqlite3` (Persistence)
+- `uv` (Dependency management)
 
 ## Development Conventions
-- Modular architecture (services, agents).
-- Credentials via `.env`.
-- State persistence for resumable tasks.
-- Robust error handling (rate limits, non-existent users).
-- Informative CLI output.
-- Code style: `ruff` formatted, OOP.
+- Asynchronous first: all agents and services use `asyncio`.
+- Safe DB handling: use `db_transaction` context manager.
+- Fail-fast config: missing credentials stop the app at startup.
+- Robust error handling: specific Tweepy exceptions caught.
+- Informative CLI output with real-time updates.
+- Code style: `ruff` formatted, type-hinted.
 
 ## Running the Tool
-1. `uv pip install -e .`
-2. `cp .env.example .env` (configure credentials)
-3. `uv run x-agent unblock` (to run unblock agent)
+1. `uv sync`
+2. `cp .env.example .env`
+3. `uv run x-agent [AGENT]`
