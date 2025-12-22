@@ -194,9 +194,6 @@ def test_unblock_user_zombie_block(x_service, caplog):
     x_service.api_v1.get_user.return_value = MagicMock(id=123)
 
     # 3. V2 Unblock raw request setup
-    # x_service uses client_v2.request.
-    # We mock it to return success or raise error.
-    # Let's assume it succeeds.
     x_service.client_v2.request.return_value = MagicMock()
 
     # Act
@@ -206,7 +203,7 @@ def test_unblock_user_zombie_block(x_service, caplog):
     # Assert
     assert result is True
     assert "User ID 123 not found (404) on V1" in caplog.text
-    assert "User ID 123 EXISTS. Attempting V2 Unblock" in caplog.text
+    assert "Attempting recovery strategies (Zombie Fix)" in caplog.text
     assert "V2 Unblock raw request successful" in caplog.text
     x_service.client_v2.request.assert_called_once()
 
@@ -229,8 +226,6 @@ def test_unblock_user_zombie_block_v2_fail_404(x_service, caplog):
     x_service.client_v2.request.side_effect = tweepy.errors.NotFound(mock_response_404)
 
     # 4. Toggle Fix (V1 Block -> Unblock) setup
-    # Note: api_v1.destroy_block is already set to raise NotFound above.
-    # We want it to stay that way to simulate toggle fix failure.
     x_service.api_v1.create_block.return_value = MagicMock()
 
     # Act
@@ -242,6 +237,7 @@ def test_unblock_user_zombie_block_v2_fail_404(x_service, caplog):
     assert "V2 Unblock ALSO returned 404" in caplog.text
     assert "Attempting Toggle Block Fix" in caplog.text
     assert "Toggle Block Fix failed" in caplog.text
+    assert "All recovery strategies failed" in caplog.text
 
 
 def test_unblock_user_toggle_fix_success(x_service, caplog):

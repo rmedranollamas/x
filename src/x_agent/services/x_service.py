@@ -224,6 +224,71 @@ class XService:
         logging.info(f"V2 Unblock raw request successful for {target_user_id}.")
         return True
 
+    def _attempt_toggle_block_fix(self, user_id: int) -> bool:
+        """
+        Attempts to fix a 'Zombie Block' by blocking and then unblocking the user via V1.1.
+
+        Args:
+            user_id: The integer ID of the user.
+
+        Returns:
+            True if the toggle fix (Block -> Unblock) succeeded, False otherwise.
+        """
+        try:
+            logging.info(
+                f"Attempting Toggle Block Fix (Block->Unblock) for {user_id}..."
+            )
+            self.api_v1.create_block(user_id=user_id)
+            time.sleep(1)
+            self.api_v1.destroy_block(user_id=user_id)
+            logging.info(f"Toggle Block Fix successful for {user_id}!")
+            return True
+        except Exception as e:
+            logging.warning(f"Toggle Block Fix failed for {user_id}: {e}")
+            return False
+
+    def _handle_zombie_recovery(self, user_id: int) -> bool | None:
+        """
+        Handles recovery strategies for active users that return 404 on initial unblock.
+        Tries V2 fallback followed by a Toggle Block Fix.
+
+        Args:
+            user_id: The integer ID of the user.
+
+        Returns:
+            True if unblocked via any recovery method, or None if all failed (to allow retry).
+        """
+        logging.info(
+            f"User ID {user_id} EXISTS. Attempting recovery strategies (Zombie Fix)..."
+        )
+
+        # 1. Try V2 Unblock Fallback
+        try:
+            self._unblock_user_v2(user_id)
+            return True
+        except tweepy.errors.NotFound as e:
+            logging.warning(
+                f"V2 Unblock ALSO returned 404 for {user_id}. API says: {e}"
+            )
+
+            # 2. Try Toggle Block Fix (Block then Unblock)
+            if self._attempt_toggle_block_fix(user_id):
+                return True
+
+            logging.warning(
+                f"All recovery strategies failed for {user_id}. Will retry in next session."
+            )
+            return None  # Signal to retry later
+
+        except tweepy.errors.TooManyRequests as e:
+            self._handle_rate_limit(e)
+            return None
+        except Exception as e:
+            logging.error(
+                f"Recovery failed for {user_id} due to unexpected error: {e}. Will retry in next session."
+            )
+            return None
+
     def unblock_user(self, user_id: int) -> bool | str | None:
         """
         Unblocks a single user by their ID using the V1.1 API (via Tweepy).
@@ -244,44 +309,34 @@ class XService:
         except tweepy.errors.NotFound as e:
             # V1 says 404. Could be Ghost (Deleted) or Zombie (Active but V1 glitch).
             logging.warning(
-                f"User ID {user_id} not found (404) on V1. API says: {e}. Checking if user exists (Zombie check)..."
+                f"User ID {user_id} not found (404) on V1. API says: {e}. Checking if user exists..."
             )
 
             if self._check_user_exists_v1(user_id):
-                logging.info(
-                    f"User ID {user_id} EXISTS. Attempting V2 Unblock (Zombie Fix)..."
-                )
-                try:
-                    self._unblock_user_v2(user_id)
-                    return True
-                except tweepy.errors.NotFound as v2_e:
-                    logging.warning(
-                        f"V2 Unblock ALSO returned 404 for {user_id}. Attempting Toggle Block Fix (Block->Unblock)... API says: {v2_e}"
-                    )
-                    try:
-                        self.api_v1.create_block(user_id=user_id)
-                        time.sleep(1)
-                        self.api_v1.destroy_block(user_id=user_id)
-                        logging.info(f"Toggle Block Fix successful for {user_id}!")
-                        return True
-                    except Exception as toggle_e:
-                        logging.warning(
-                            f"Toggle Block Fix failed for {user_id}: {toggle_e} Will retry in next session."
-                        )
-                        return None  # Do NOT mark as Ghost if user exists
-                except tweepy.errors.TooManyRequests as v2_e:
-                    self._handle_rate_limit(v2_e)
-                    return None
-                except Exception as v2_e:
-                    logging.error(
-                        f"V2 Unblock failed for {user_id}: {v2_e}. Will retry in next session."
-                    )
-                    return None  # Retry later
+                return self._handle_zombie_recovery(user_id)
             else:
                 logging.warning(
                     f"User ID {user_id} confirmed missing. Skipping (Ghost Block)."
                 )
                 return "NOT_FOUND"
+
+        except tweepy.errors.Forbidden as e:
+            # Forbidden (403) - Suspended or otherwise inaccessible
+            logging.warning(
+                f"Forbidden (403) for User ID {user_id}. API says: {e}. Skipping."
+            )
+            return "NOT_FOUND"
+
+        except tweepy.errors.TooManyRequests as e:
+            # Rate Limit (429)
+            self._handle_rate_limit(e)
+            return None
+
+        except Exception as e:
+            logging.error(
+                f"Could not unblock user ID {user_id}. Exception: {e}", exc_info=True
+            )
+            return None
 
         except tweepy.errors.Forbidden as e:
             # Forbidden (403) - Suspended or otherwise inaccessible
