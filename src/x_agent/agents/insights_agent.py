@@ -1,5 +1,6 @@
 import logging
 import asyncio
+from typing import Optional
 import tweepy
 from .base_agent import BaseAgent
 from ..services.x_service import XService
@@ -55,9 +56,19 @@ class InsightsAgent(BaseAgent):
         logging.info("Insights agent finished successfully.")
 
     def _generate_report(
-        self, current_followers: int, current_following: int, latest_insight: dict
+        self,
+        current_followers: int,
+        current_following: int,
+        latest_insight: Optional[dict] = None,
     ) -> None:
-        """Generates and prints a report comparing current and previous metrics."""
+        """
+        Generates and prints a report comparing current and previous metrics.
+
+        Args:
+            current_followers: The current number of followers.
+            current_following: The current number of accounts being followed.
+            latest_insight: A dictionary-like object containing previous metrics.
+        """
         report_lines = ["\n--- Daily X Account Insights ---"]
 
         if latest_insight:
