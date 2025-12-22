@@ -12,6 +12,8 @@ class XService:
     Handles client authentication, rate limiting, and API calls.
     """
 
+    _TOGGLE_FIX_DELAY_SECONDS = 1
+
     def __init__(self) -> None:
         """Initializes the XService, creating authenticated API clients."""
         self.api_v1, self.client_v2, self.authenticated_user_id = (
@@ -239,7 +241,7 @@ class XService:
                 f"Attempting Toggle Block Fix (Block->Unblock) for {user_id}..."
             )
             self.api_v1.create_block(user_id=user_id)
-            time.sleep(1)
+            time.sleep(self._TOGGLE_FIX_DELAY_SECONDS)
             self.api_v1.destroy_block(user_id=user_id)
             logging.info(f"Toggle Block Fix successful for {user_id}!")
             return True
