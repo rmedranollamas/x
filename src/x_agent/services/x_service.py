@@ -70,16 +70,73 @@ class XService:
         )
         return blocked_user_ids
 
+    async def _check_user_exists_v1(self, user_id: int) -> bool:
+        """Checks if a user exists and is active using v1.1 API."""
+        try:
+            await asyncio.to_thread(self.api_v1.get_user, user_id=user_id)
+            return True
+        except tweepy.errors.NotFound:
+            return False
+        except tweepy.errors.Forbidden as e:
+            logging.warning(
+                f"User {user_id} is suspended (Forbidden). Treating as Ghost Block. API says: {e}"
+            )
+            return False
+        except Exception as e:
+            logging.warning(f"Error checking existence of user {user_id}: {e}")
+            return False
+
+    async def _handle_zombie_recovery(self, user_id: int) -> str:
+        """
+        Attempts to fix a 'Zombie Block' (user exists but V1 unblock fails with 404).
+        Strategies:
+        1. V2 Unblock fallback.
+        2. Toggle Block fix (block then unblock).
+        """
+        logging.warning(
+            f"User ID {user_id} EXISTS. Attempting recovery strategies (Zombie Fix)..."
+        )
+
+        # Strategy 1: V2 Unblock
+        try:
+            # client.unblock corresponds to DELETE /2/users/:id/blocking/:target_user_id
+            await self.client.unblock(target_user_id=user_id)
+            return "SUCCESS"
+        except tweepy.errors.NotFound as e:
+            logging.warning(f"V2 Unblock ALSO returned 404 for {user_id}. API says: {e}")
+        except Exception as e:
+            logging.warning(f"V2 Unblock failed for {user_id}: {e}")
+
+        # Strategy 2: Toggle Block Fix
+        try:
+            await asyncio.to_thread(self.api_v1.create_block, user_id=user_id)
+            await asyncio.to_thread(self.api_v1.destroy_block, user_id=user_id)
+            return "SUCCESS"
+        except Exception as e:
+            logging.warning(f"Toggle Block Fix failed for {user_id}: {e}")
+
+        logging.warning(
+            f"All recovery strategies failed for {user_id}. Will retry in next session."
+        )
+        return "FAILED"
+
     async def unblock_user(self, user_id: int) -> str:
         """
-        Unblocks a user using v1.1 API.
+        Unblocks a user using v1.1 API with Zombie Block recovery.
         Returns "SUCCESS", "NOT_FOUND", or "FAILED".
         """
         try:
             await asyncio.to_thread(self.api_v1.destroy_block, user_id=user_id)
             return "SUCCESS"
-        except tweepy.errors.NotFound:
-            return "NOT_FOUND"
+        except tweepy.errors.NotFound as e:
+            logging.warning(
+                f"User ID {user_id} not found (404) on V1. API says: {e}. Checking if user exists..."
+            )
+            if await self._check_user_exists_v1(user_id):
+                return await self._handle_zombie_recovery(user_id)
+            else:
+                logging.warning(f"User ID {user_id} confirmed missing. Skipping (Ghost Block).")
+                return "NOT_FOUND"
         except Exception as e:
             logging.warning(f"Failed to unblock {user_id}: {e}")
             return "FAILED"
