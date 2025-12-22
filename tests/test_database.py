@@ -50,7 +50,8 @@ def test_blocked_users_operations(tmp_path):
         assert database.get_processed_users_count() == 2
         pending = database.get_pending_blocked_users()
         assert 101 not in pending
-        assert 103 in pending
+        assert 102 in pending  # FAILED should be included
+        assert 103 in pending  # PENDING should be included
 
 
 def test_insights_operations(tmp_path):

@@ -106,10 +106,12 @@ def add_blocked_users(user_ids: set[int]) -> None:
 
 
 def get_pending_blocked_users() -> List[int]:
-    """Retrieves all user IDs with status 'PENDING'."""
+    """Retrieves all user IDs with status 'PENDING' or 'FAILED'."""
     with db_transaction() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT user_id FROM blocked_users WHERE status = 'PENDING'")
+        cursor.execute(
+            "SELECT user_id FROM blocked_users WHERE status IN ('PENDING', 'FAILED')"
+        )
         rows = cursor.fetchall()
         return [row["user_id"] for row in rows]
 
