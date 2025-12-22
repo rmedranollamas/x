@@ -98,6 +98,7 @@ class UnblockAgent(BaseAgent):
 
         # Limit concurrency
         sem = asyncio.Semaphore(20)
+        lock = asyncio.Lock()
 
         async def unblock_worker(user_id):
             nonlocal session_unblocked_count, failed_count
@@ -108,28 +109,33 @@ class UnblockAgent(BaseAgent):
                     await asyncio.to_thread(
                         database.update_user_status, user_id, "UNBLOCKED"
                     )
-                    session_unblocked_count += 1
+                    async with lock:
+                        session_unblocked_count += 1
 
-                    processed_so_far = (
-                        already_unblocked_count + session_unblocked_count + failed_count
-                    )
-                    remaining = total_blocked_count - processed_so_far
-                    logging.info(
-                        f"Unblocked ID {user_id}. Remaining: ~{remaining}",
-                        extra={"single_line": True},
-                    )
+                        processed_so_far = (
+                            already_unblocked_count
+                            + session_unblocked_count
+                            + failed_count
+                        )
+                        remaining = total_blocked_count - processed_so_far
+                        logging.info(
+                            f"Unblocked ID {user_id}. Remaining: ~{remaining}",
+                            extra={"single_line": True},
+                        )
 
                 elif status == "NOT_FOUND":
                     await asyncio.to_thread(
                         database.update_user_status, user_id, "NOT_FOUND"
                     )
-                    failed_count += 1
+                    async with lock:
+                        failed_count += 1
                     logging.debug(f"User {user_id} not found (possibly deleted).")
                 else:
                     await asyncio.to_thread(
                         database.update_user_status, user_id, "FAILED"
                     )
-                    failed_count += 1
+                    async with lock:
+                        failed_count += 1
                     logging.warning(f"Failed to unblock {user_id}.")
 
         tasks = [unblock_worker(uid) for uid in ids_to_unblock]
