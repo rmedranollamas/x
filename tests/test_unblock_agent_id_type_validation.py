@@ -41,17 +41,15 @@ def test_unblock_agent_init_with_valid_user_id(mock_x_service):
         pytest.fail("UnblockAgent raised TypeError with user_id=12345")
 
 
-def test_unblock_agent_init_with_invalid_user_id_type(mock_x_service):
+@pytest.mark.parametrize("user_id", [
+    "invalid",
+    123.45,
+    [123],
+    {"id": 123},
+])
+def test_unblock_agent_init_with_invalid_user_id_type(mock_x_service, user_id):
     """
     Test that UnblockAgent's __init__ raises TypeError when user_id is not an integer or None.
     """
-    invalid_inputs = [
-        ("invalid", "User ID must be an integer"),
-        (123.45, "User ID must be an integer"),
-        ([123], "User ID must be an integer"),
-        ({"id": 123}, "User ID must be an integer"),
-    ]
-
-    for user_id, error_msg in invalid_inputs:
-        with pytest.raises(TypeError, match=error_msg):
-            UnblockAgent(x_service=mock_x_service, user_id=user_id)
+    with pytest.raises(TypeError, match="User ID must be an integer"):
+        UnblockAgent(x_service=mock_x_service, user_id=user_id)
