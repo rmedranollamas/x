@@ -15,11 +15,8 @@ def test_unblock_agent_init_with_none_user_id(mock_x_service):
     Test that UnblockAgent's __init__ allows user_id to be None.
     This validates the explicit type checking logic allows None.
     """
-    try:
-        agent = UnblockAgent(x_service=mock_x_service, user_id=None)
-        assert agent.user_id is None
-    except TypeError:
-        pytest.fail("UnblockAgent raised TypeError with user_id=None")
+    agent = UnblockAgent(x_service=mock_x_service, user_id=None)
+    assert agent.user_id is None
 
 
 def test_unblock_agent_init_defaults_to_none_user_id(mock_x_service):
@@ -34,11 +31,8 @@ def test_unblock_agent_init_with_valid_user_id(mock_x_service):
     """
     Test that UnblockAgent's __init__ allows user_id to be an integer.
     """
-    try:
-        agent = UnblockAgent(x_service=mock_x_service, user_id=12345)
-        assert agent.user_id == 12345
-    except TypeError:
-        pytest.fail("UnblockAgent raised TypeError with user_id=12345")
+    agent = UnblockAgent(x_service=mock_x_service, user_id=12345)
+    assert agent.user_id == 12345
 
 
 @pytest.mark.parametrize("user_id", [
