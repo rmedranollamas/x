@@ -70,8 +70,14 @@ class XService:
         )
         return blocked_user_ids
 
-    async def _check_user_exists_v1(self, user_id: int) -> bool:
-        """Checks if a user exists and is active using v1.1 API."""
+    async def _check_user_exists_v1(self, user_id: int) -> bool | None:
+        """
+        Checks if a user exists and is active using v1.1 API.
+        Returns:
+            True: User exists.
+            False: User does not exist (NotFound or Forbidden).
+            None: Unable to verify (Unexpected error).
+        """
         try:
             await asyncio.to_thread(self.api_v1.get_user, user_id=user_id)
             return True
@@ -84,7 +90,7 @@ class XService:
             return False
         except Exception as e:
             logging.warning(f"Error checking existence of user {user_id}: {e}")
-            return False
+            return None
 
     async def _handle_zombie_recovery(self, user_id: int) -> str:
         """
@@ -134,13 +140,19 @@ class XService:
             logging.warning(
                 f"User ID {user_id} not found (404) on V1. API says: {e}. Checking if user exists..."
             )
-            if await self._check_user_exists_v1(user_id):
+            exists = await self._check_user_exists_v1(user_id)
+            if exists is True:
                 return await self._handle_zombie_recovery(user_id)
-            else:
+            elif exists is False:
                 logging.warning(
                     f"User ID {user_id} confirmed missing. Skipping (Ghost Block)."
                 )
                 return "NOT_FOUND"
+            else:  # exists is None
+                logging.warning(
+                    f"Could not verify existence of {user_id}. Returning FAILED to retry later."
+                )
+                return "FAILED"
         except Exception as e:
             logging.warning(f"Failed to unblock {user_id}: {e}")
             return "FAILED"
