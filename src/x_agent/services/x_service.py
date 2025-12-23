@@ -71,8 +71,8 @@ class XService:
         return blocked_user_ids
 
     async def _check_user_exists_v1(self, user_id: int) -> bool | None:
-        """
-        Checks if a user exists and is active using v1.1 API.
+        """Checks if a user exists and is active using v1.1 API.
+
         Returns:
             True: User exists.
             False: User does not exist (NotFound or Forbidden).
