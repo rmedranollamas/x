@@ -35,12 +35,15 @@ def test_unblock_agent_init_with_valid_user_id(mock_x_service):
     assert agent.user_id == 12345
 
 
-@pytest.mark.parametrize("user_id", [
-    "invalid",
-    123.45,
-    [123],
-    {"id": 123},
-])
+@pytest.mark.parametrize(
+    "user_id",
+    [
+        "invalid",
+        123.45,
+        [123],
+        {"id": 123},
+    ],
+)
 def test_unblock_agent_init_with_invalid_user_id_type(mock_x_service, user_id):
     """
     Test that UnblockAgent's __init__ raises TypeError when user_id is not an integer or None.

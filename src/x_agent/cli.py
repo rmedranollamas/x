@@ -36,6 +36,9 @@ def unblock(
     user_id: Optional[int] = typer.Option(
         None, "--user-id", help="Optional: Specify a single user ID to unblock."
     ),
+    refresh: bool = typer.Option(
+        False, "--refresh", help="Re-fetch blocked IDs from API, ignoring local cache."
+    ),
     debug: bool = typer.Option(
         False, "--debug", help="Enable debug logging for detailed output."
     ),
@@ -43,7 +46,7 @@ def unblock(
     """
     Run the unblock agent to unblock blocked accounts.
     """
-    _run_agent(UnblockAgent, debug, user_id=user_id)
+    _run_agent(UnblockAgent, debug, user_id=user_id, refresh=refresh)
 
 
 @app.command()
@@ -63,6 +66,11 @@ def unfollow(
     non_followers: bool = typer.Option(
         True, help="Only unfollow users who don't follow you back."
     ),
+    refresh: bool = typer.Option(
+        False,
+        "--refresh",
+        help="Re-fetch following/follower IDs from API, ignoring local cache.",
+    ),
     debug: bool = typer.Option(
         False, "--debug", help="Enable debug logging for detailed output."
     ),
@@ -70,7 +78,7 @@ def unfollow(
     """
     Run the unfollow agent to clean up your following list.
     """
-    _run_agent(UnfollowAgent, debug, non_followers_only=non_followers)
+    _run_agent(UnfollowAgent, debug, non_followers_only=non_followers, refresh=refresh)
 
 
 @app.command(name="blocked-ids")

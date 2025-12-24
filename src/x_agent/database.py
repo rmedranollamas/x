@@ -139,6 +139,13 @@ def get_processed_users_count() -> int:
         return cursor.fetchone()[0]
 
 
+def clear_pending_blocked_users() -> None:
+    """Deletes all users with status 'PENDING' from blocked_users table."""
+    with db_transaction() as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM blocked_users WHERE status = 'PENDING'")
+
+
 def update_user_status(user_id: int, status: str) -> None:
     """Updates the status of a specific user."""
     with db_transaction() as conn:
@@ -200,6 +207,13 @@ def get_processed_following_count() -> int:
         cursor = conn.cursor()
         cursor.execute("SELECT COUNT(*) FROM following_users WHERE status != 'PENDING'")
         return cursor.fetchone()[0]
+
+
+def clear_pending_following_users() -> None:
+    """Deletes all users with status 'PENDING' from following_users table."""
+    with db_transaction() as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM following_users WHERE status = 'PENDING'")
 
 
 def update_following_status(user_ids: List[int], status: str) -> None:

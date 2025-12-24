@@ -35,11 +35,18 @@ class XService:
         try:
             logging.debug("Authenticating...")
             me = await self.client.get_me()
+            if not me.data:
+                raise Exception("Authentication successful but no user data returned.")
             self.user_id = me.data.id
             logging.info(f"Authenticated as {me.data.username} (ID: {self.user_id})")
         except Exception as e:
             logging.error(f"Authentication failed: {e}", exc_info=True)
             sys.exit(1)
+
+    async def ensure_initialized(self) -> None:
+        """Ensures the service is authenticated and user_id is set."""
+        if self.user_id is None:
+            await self.initialize()
 
     async def get_blocked_user_ids(self) -> set[int]:
         """
@@ -106,7 +113,8 @@ class XService:
         # Strategy 1: V2 Unblock
         try:
             # client.unblock corresponds to DELETE /2/users/:id/blocking/:target_user_id
-            await self.client.unblock(target_user_id=user_id)
+            await self.ensure_initialized()
+            await self.client.unblock(id=self.user_id, target_user_id=user_id)
             return "SUCCESS"
         except tweepy.errors.NotFound as e:
             logging.warning(

@@ -116,7 +116,7 @@ async def test_unblock_user_zombie_fixed_v2(x_service, mock_api_v1, mock_async_c
     result = await x_service.unblock_user(999)
 
     assert result == "SUCCESS"
-    mock_async_client.unblock.assert_awaited_once_with(target_user_id=999)
+    mock_async_client.unblock.assert_awaited_once_with(id=12345, target_user_id=999)
 
 
 @pytest.mark.asyncio
@@ -137,6 +137,7 @@ async def test_unblock_user_zombie_fixed_toggle(
     result = await x_service.unblock_user(999)
 
     assert result == "SUCCESS"
+    mock_async_client.unblock.assert_awaited_once_with(id=12345, target_user_id=999)
     mock_api_v1.create_block.assert_called_once_with(user_id=999)
 
 

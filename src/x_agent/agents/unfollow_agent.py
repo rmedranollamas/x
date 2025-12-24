@@ -11,32 +11,47 @@ class UnfollowAgent(BaseAgent):
     By default, it targets accounts that do not follow the user back.
     """
 
-    def __init__(self, x_service: XService, non_followers_only: bool = True) -> None:
+    def __init__(
+        self,
+        x_service: XService,
+        non_followers_only: bool = True,
+        refresh: bool = False,
+    ) -> None:
         """
         Initializes the agent with a service to interact with the X API.
 
         Args:
             x_service: An instance of XService.
             non_followers_only: If True, only unfollow users who don't follow back.
+            refresh: Optional. If True, re-fetches following/follower IDs from API.
         """
         self.x_service = x_service
         self.non_followers_only = non_followers_only
+        self.refresh = refresh
 
     async def execute(self) -> None:
         """
         Executes the main logic of the agent.
         """
         logging.info("--- X Unfollow Agent (Async) ---")
+        await self.x_service.ensure_initialized()
         await asyncio.to_thread(database.initialize_database)
 
         total_following_count = await asyncio.to_thread(
             database.get_all_following_users_count
         )
 
-        if total_following_count == 0:
-            logging.info(
-                "No local cache of following users found. Fetching from API..."
-            )
+        if total_following_count == 0 or self.refresh:
+            if self.refresh:
+                logging.info(
+                    "Refresh requested. Fetching latest following/follower IDs from API..."
+                )
+                await asyncio.to_thread(database.clear_pending_following_users)
+            else:
+                logging.info(
+                    "No local cache of following users found. Fetching from API..."
+                )
+
             following_ids = await self.x_service.get_following_user_ids()
 
             if self.non_followers_only:
@@ -50,11 +65,14 @@ class UnfollowAgent(BaseAgent):
 
             if target_ids:
                 await asyncio.to_thread(database.add_following_users, target_ids)
-                total_following_count = len(target_ids)
-                logging.info(f"Saved {total_following_count} target users to database.")
+                total_following_count = await asyncio.to_thread(
+                    database.get_all_following_users_count
+                )
+                logging.info(f"Saved {len(target_ids)} target users to database.")
             else:
-                logging.info("No users found to unfollow.")
-                return
+                if not self.refresh:
+                    logging.info("No users found to unfollow.")
+                    return
         else:
             logging.info(f"Found {total_following_count} target users in database.")
 

@@ -32,7 +32,7 @@ def test_unblock_command(mock_x_service, mock_agents):
 
             assert result.exit_code == 0
             mock_unblock_cls.assert_called_once_with(
-                mock_x_service.return_value, user_id=None
+                mock_x_service.return_value, user_id=None, refresh=False
             )
             mock_run.assert_called_once()
 
@@ -47,7 +47,7 @@ def test_unblock_command_with_user_id(mock_x_service, mock_agents):
 
             assert result.exit_code == 0
             mock_unblock_cls.assert_called_once_with(
-                mock_x_service.return_value, user_id=12345
+                mock_x_service.return_value, user_id=12345, refresh=False
             )
             mock_run.assert_called_once()
 
@@ -76,6 +76,20 @@ def test_blocked_ids_command(mock_x_service, mock_agents):
             assert result.exit_code == 0
             mock_blocked_ids_cls.assert_called_once()
             mock_run.assert_called_once()
+
+
+def test_unfollow_command(mock_x_service, mock_agents):
+    with patch("src.x_agent.cli.UnfollowAgent") as mock_unfollow_cls:
+        mock_unfollow_instance = mock_unfollow_cls.return_value
+        with patch.object(mock_unfollow_instance, "execute", new_callable=MagicMock):
+            with patch("src.x_agent.cli.asyncio.run") as mock_run:
+                result = runner.invoke(app, ["unfollow"])
+
+                assert result.exit_code == 0
+                mock_unfollow_cls.assert_called_once_with(
+                    mock_x_service.return_value, non_followers_only=True, refresh=False
+                )
+                mock_run.assert_called_once()
 
 
 def test_invalid_command():

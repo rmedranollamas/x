@@ -10,16 +10,20 @@ class UnblockAgent(BaseAgent):
     An agent responsible for unblocking all blocked users on an X account.
     """
 
-    def __init__(self, x_service: XService, user_id: int | None = None) -> None:
+    def __init__(
+        self, x_service: XService, user_id: int | None = None, refresh: bool = False
+    ) -> None:
         """
         Initializes the agent with a service to interact with the X API.
 
         Args:
             x_service: An instance of XService.
             user_id: Optional. A specific user ID to unblock.
+            refresh: Optional. If True, re-fetches blocked IDs from API.
         """
         self.x_service = x_service
         self.user_id = user_id
+        self.refresh = refresh
 
         if self.user_id is not None and not isinstance(self.user_id, int):
             raise TypeError("User ID must be an integer")
@@ -30,38 +34,54 @@ class UnblockAgent(BaseAgent):
 
         Fetches the list of blocked users, stores them in the DB, and unblocks them.
         """
+        await self.x_service.ensure_initialized()
+        await asyncio.to_thread(database.initialize_database)
+
         # Specific user_id override
         if self.user_id is not None:
             logging.info(f"Attempting to unblock specific user ID: {self.user_id}")
             status = await self.x_service.unblock_user(self.user_id)
             if status == "SUCCESS":
                 logging.info(f"Successfully unblocked {self.user_id}.")
+                await asyncio.to_thread(
+                    database.update_user_status, self.user_id, "UNBLOCKED"
+                )
             else:
                 logging.error(f"Failed to unblock {self.user_id}: {status}")
+                await asyncio.to_thread(
+                    database.update_user_status, self.user_id, "FAILED"
+                )
             return
 
         logging.info("--- X Unblock Agent (Async) ---")
-        await asyncio.to_thread(database.initialize_database)
 
         # --- State Loading and Resumption Logic ---
         total_blocked_count = await asyncio.to_thread(
             database.get_all_blocked_users_count
         )
 
-        if total_blocked_count == 0:
-            logging.info(
-                "No local cache of blocked IDs found. Fetching from the API..."
-            )
+        if total_blocked_count == 0 or self.refresh:
+            if self.refresh:
+                logging.info(
+                    "Refresh requested. Fetching latest blocked IDs from API..."
+                )
+                await asyncio.to_thread(database.clear_pending_blocked_users)
+            else:
+                logging.info(
+                    "No local cache of blocked IDs found. Fetching from the API..."
+                )
+
             all_blocked_ids = await self.x_service.get_blocked_user_ids()
             if all_blocked_ids:
                 await asyncio.to_thread(database.add_blocked_users, all_blocked_ids)
-                total_blocked_count = len(all_blocked_ids)
-                logging.info(f"Saved {total_blocked_count} blocked IDs to database.")
+                total_blocked_count = await asyncio.to_thread(
+                    database.get_all_blocked_users_count
+                )
+                logging.info(f"Saved {len(all_blocked_ids)} blocked IDs to database.")
             else:
-                logging.info("No blocked IDs found from the API.")
-                return
-        else:
-            logging.info(f"Found {total_blocked_count} blocked IDs in database.")
+                if not self.refresh:
+                    logging.info("No blocked IDs found from the API.")
+                    return
 
         pending_ids = await asyncio.to_thread(database.get_pending_blocked_users)
         processed_count = await asyncio.to_thread(database.get_processed_users_count)
@@ -77,13 +97,11 @@ class UnblockAgent(BaseAgent):
             return
 
         # --- Unblocking Process ---
-        await self._unblock_user_ids(pending_ids, total_blocked_count, processed_count)
+        await self._unblock_user_ids(pending_ids)
 
     async def _unblock_user_ids(
         self,
         ids_to_unblock: list[int],
-        total_blocked_count: int,
-        already_unblocked_count: int,
     ) -> None:
         """
         Iterates through a list of user IDs and unblocks each one concurrently.
