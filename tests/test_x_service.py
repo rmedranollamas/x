@@ -2,13 +2,13 @@ import pytest
 import tweepy.asynchronous
 import tweepy
 from unittest.mock import MagicMock, AsyncMock, patch
-from src.x_agent.services.x_service import XService
+from x_agent.services.x_service import XService
 
 
 @pytest.fixture(autouse=True)
 def mock_env_vars():
     """Mocks the settings object."""
-    with patch("src.x_agent.services.x_service.settings") as mock_settings:
+    with patch("x_agent.services.x_service.settings") as mock_settings:
         mock_settings.x_api_key = "test_api_key"
         mock_settings.x_api_key_secret = "test_api_key_secret"
         mock_settings.x_access_token = "test_access_token"
@@ -49,15 +49,15 @@ def x_service(mock_async_client, mock_api_v1):
     """Fixture for XService with mocked AsyncClient and API v1.1."""
     with (
         patch(
-            "src.x_agent.services.x_service.tweepy.asynchronous.AsyncClient",
+            "x_agent.services.x_service.tweepy.asynchronous.AsyncClient",
             return_value=mock_async_client,
         ),
         patch(
-            "src.x_agent.services.x_service.tweepy.OAuth1UserHandler",
+            "x_agent.services.x_service.tweepy.OAuth1UserHandler",
             return_value=MagicMock(),
         ),
         patch(
-            "src.x_agent.services.x_service.tweepy.API",
+            "x_agent.services.x_service.tweepy.API",
             return_value=mock_api_v1,
         ),
     ):

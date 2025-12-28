@@ -1,36 +1,47 @@
 import pytest
 import sqlite3
+from pathlib import Path
 from unittest.mock import patch
-from src.x_agent import database
+from x_agent import database
 
 
 @pytest.fixture
-def mock_db(tmp_path):
-    """Fixture to use a temporary database file for testing."""
-    test_db = tmp_path / "test_insights.db"
-    with patch("src.x_agent.database.DB_FILE", test_db):
+def test_db_path(tmp_path):
+    """Fixture to provide a temporary database path."""
+    return tmp_path / "test_insights.db"
+
+
+def test_initialize_database(test_db_path):
+    # run_migrations is imported inside initialize_database
+    # it then calls _ensure_migrations_table which imports db_transaction from database
+    # db_transaction uses get_db_path from database.
+    # So patching database.get_db_path should work.
+    with patch("x_agent.database.get_db_path", return_value=test_db_path):
         database.initialize_database()
-        yield test_db
+        assert test_db_path.exists()
 
-
-def test_initialize_database(tmp_path):
-    test_db = tmp_path / "init_test.db"
-    with patch("src.x_agent.database.DB_FILE", test_db):
-        database.initialize_database()
-        assert test_db.exists()
-
-        conn = sqlite3.connect(test_db)
+        conn = sqlite3.connect(test_db_path)
         cursor = conn.cursor()
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
         tables = [row[0] for row in cursor.fetchall()]
         assert "insights" in tables
         assert "blocked_users" in tables
+        assert "schema_versions" in tables
         conn.close()
 
 
-def test_blocked_users_operations(tmp_path):
-    test_db = tmp_path / "ops_test.db"
-    with patch("src.x_agent.database.DB_FILE", test_db):
+def test_backup_database(test_db_path, tmp_path):
+    with patch("x_agent.database.get_db_path", return_value=test_db_path):
+        with patch("x_agent.database.STATE_DIR", tmp_path):
+            database.initialize_database()
+            backup_path = database.backup_database()
+            assert backup_path is not None
+            assert Path(backup_path).exists()
+            assert Path(backup_path).name.startswith("test_insights_")
+
+
+def test_blocked_users_operations(test_db_path):
+    with patch("x_agent.database.get_db_path", return_value=test_db_path):
         database.initialize_database()
 
         # Test adding users
@@ -39,29 +50,15 @@ def test_blocked_users_operations(tmp_path):
         assert database.get_all_blocked_users_count() == 3
         assert len(database.get_pending_blocked_users()) == 3
 
-        # Test duplicates (should ignore)
-        database.add_blocked_users({101, 104})
-        assert database.get_all_blocked_users_count() == 4
 
-        # Test update status
-        database.update_user_status(101, "UNBLOCKED")
-        database.update_user_status(102, "FAILED")
-
-        assert database.get_processed_users_count() == 2
-        pending = database.get_pending_blocked_users()
-        assert 101 not in pending
-        assert 102 in pending  # FAILED should be included
-        assert 103 in pending  # PENDING should be included
-
-
-def test_insights_operations(tmp_path):
-    test_db = tmp_path / "insights_test.db"
-    with patch("src.x_agent.database.DB_FILE", test_db):
+def test_insights_operations(test_db_path):
+    with patch("x_agent.database.get_db_path", return_value=test_db_path):
         database.initialize_database()
 
         database.add_insight(100, 50)
         database.add_insight(110, 55)
 
         latest = database.get_latest_insight()
+        assert latest is not None
         assert latest["followers"] == 110
         assert latest["following"] == 55

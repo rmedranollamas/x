@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
-from src.x_agent.agents.unfollow_agent import UnfollowAgent
-from src.x_agent.services.x_service import XService
+from x_agent.agents.unfollow_agent import UnfollowAgent
+from x_agent.services.x_service import XService
 
 
 @pytest.fixture
@@ -14,7 +14,7 @@ def mock_x_service():
 
 @pytest.fixture
 def mock_database():
-    with patch("src.x_agent.agents.unfollow_agent.database") as mock_db:
+    with patch("x_agent.agents.unfollow_agent.database") as mock_db:
         yield mock_db
 
 

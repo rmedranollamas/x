@@ -1,8 +1,8 @@
 import pytest
 import logging
 from unittest.mock import MagicMock, AsyncMock
-from src.x_agent.agents.blocked_ids_agent import BlockedIdsAgent
-from src.x_agent.services.x_service import XService
+from x_agent.agents.blocked_ids_agent import BlockedIdsAgent
+from x_agent.services.x_service import XService
 
 
 @pytest.fixture

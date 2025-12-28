@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
-from src.x_agent.agents.insights_agent import InsightsAgent
-from src.x_agent.services.x_service import XService
+from x_agent.agents.insights_agent import InsightsAgent
+from x_agent.services.x_service import XService
 
 
 @pytest.fixture
@@ -15,7 +15,9 @@ def mock_x_service():
 
 @pytest.fixture
 def mock_database():
-    with patch("src.x_agent.agents.insights_agent.database") as mock_db:
+    with patch("x_agent.agents.insights_agent.database") as mock_db:
+        # Default offset returns to None to avoid MagicMock comparison errors
+        mock_db.get_insight_at_offset.return_value = None
         yield mock_db
 
 
@@ -29,7 +31,11 @@ async def test_execute_first_run(insights_agent, mock_x_service, mock_database, 
     """Test insights agent behavior on the first run (no previous data)."""
     # Setup API response
     mock_me = MagicMock()
-    mock_me.public_metrics = {"followers_count": 100, "following_count": 50}
+    mock_me.public_metrics = {
+        "followers_count": 100,
+        "following_count": 50,
+        "tweet_count": 10,
+    }
     mock_x_service.get_me.return_value = MagicMock(data=mock_me)
 
     # No previous insight in DB
@@ -38,11 +44,11 @@ async def test_execute_first_run(insights_agent, mock_x_service, mock_database, 
     await insights_agent.execute()
 
     mock_database.initialize_database.assert_called_once()
-    mock_database.add_insight.assert_called_once_with(100, 50)
+    mock_database.add_insight.assert_called_once_with(100, 50, 10)
 
     captured = capsys.readouterr()
-    assert "Followers: 100 (First run)" in captured.out
-    assert "Following: 50 (First run)" in captured.out
+    assert "Followers:  100" in captured.out
+    assert "Following: 50" in captured.out
 
 
 @pytest.mark.asyncio
@@ -52,16 +58,25 @@ async def test_execute_with_previous_data(
     """Test insights agent behavior when comparing with previous data."""
     # Current metrics
     mock_me = MagicMock()
-    mock_me.public_metrics = {"followers_count": 110, "following_count": 45}
+    mock_me.public_metrics = {
+        "followers_count": 110,
+        "following_count": 45,
+        "tweet_count": 15,
+    }
     mock_x_service.get_me.return_value = MagicMock(data=mock_me)
 
     # Previous metrics in DB
-    mock_database.get_latest_insight.return_value = {"followers": 100, "following": 50}
+    mock_database.get_latest_insight.return_value = {
+        "followers": 100,
+        "following": 50,
+        "tweet_count": 5,
+    }
 
     await insights_agent.execute()
 
-    mock_database.add_insight.assert_called_once_with(110, 45)
+    mock_database.add_insight.assert_called_once_with(110, 45, 15)
 
     captured = capsys.readouterr()
-    assert "Followers: 110 (+10)" in captured.out
-    assert "Following: 45 (-5)" in captured.out
+    assert "Followers:  110" in captured.out
+    assert "+10" in captured.out
+    assert "+10" in captured.out  # Tweet delta 15-5

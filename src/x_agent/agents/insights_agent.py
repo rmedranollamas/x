@@ -104,10 +104,13 @@ class InsightsAgent(BaseAgent):
             f_delta = current_followers - insight["followers"]
             t_delta = current_tweets - insight["tweet_count"]
 
-            f_sign = "+" if f_delta >= 0 else ""
-            t_sign = "+" if t_delta >= 0 else ""
+            f_sign = "+" if f_delta >= 0 else "-"
+            t_sign = "+" if t_delta >= 0 else "-"
 
-            print(f"{label:12} | {f_sign}{f_delta:>9} | {t_sign}{t_delta:>7}")
+            f_delta_str = f"{f_sign}{abs(f_delta)}"
+            t_delta_str = f"{t_sign}{abs(t_delta)}"
+
+            print(f"{label:12} | {f_delta_str:>10} | {t_delta_str:>8}")
 
         if not has_history:
             print("No historical data yet. First run recorded!")

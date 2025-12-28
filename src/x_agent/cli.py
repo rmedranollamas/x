@@ -9,12 +9,42 @@ from .agents.insights_agent import InsightsAgent
 from .agents.blocked_ids_agent import BlockedIdsAgent
 from .agents.unfollow_agent import UnfollowAgent
 from .logging_setup import setup_logging
+from .config import settings
+from .database import backup_database, get_db_path
 
 app = typer.Typer(
     name="x-agent",
     help="A command-line tool to manage X interactions with agents.",
     add_completion=False,
 )
+
+db_app = typer.Typer(help="Database management commands.")
+app.add_typer(db_app, name="db")
+
+
+@db_app.command("backup")
+def db_backup(
+    debug: bool = typer.Option(False, "--debug", help="Enable debug logging."),
+):
+    """
+    Create a backup of the database.
+    """
+    setup_logging(debug)
+    backup_path = backup_database()
+    if backup_path:
+        typer.echo(f"Backup created at: {backup_path}")
+    else:
+        typer.echo("Backup failed or no database exists.")
+
+
+@db_app.command("info")
+def db_info():
+    """
+    Show database configuration info.
+    """
+    typer.echo(f"Environment: {settings.environment}")
+    typer.echo(f"Database File: {get_db_path()}")
+    typer.echo(f"Is Dev: {settings.is_dev}")
 
 
 def _run_agent(agent_class, debug: bool, **kwargs):

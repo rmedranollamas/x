@@ -12,5 +12,15 @@ class Settings(BaseSettings):
     x_access_token: str = Field(..., validation_alias="X_ACCESS_TOKEN")
     x_access_token_secret: str = Field(..., validation_alias="X_ACCESS_TOKEN_SECRET")
 
+    environment: str = Field("development", validation_alias="X_AGENT_ENV")
+
+    @property
+    def is_dev(self) -> bool:
+        return self.environment.lower() == "development"
+
+    @property
+    def db_name(self) -> str:
+        return "insights_dev.db" if self.is_dev else "insights.db"
+
 
 settings = Settings()

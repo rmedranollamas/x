@@ -1,11 +1,17 @@
 import sqlite3
 import logging
+import shutil
+import time
 from pathlib import Path
 from typing import List, Optional
 from contextlib import contextmanager
+from .config import settings
 
 STATE_DIR = Path(".state")
-DB_FILE = STATE_DIR / "insights.db"
+
+
+def get_db_path() -> Path:
+    return STATE_DIR / settings.db_name
 
 
 @contextmanager
@@ -15,7 +21,8 @@ def db_transaction():
     Ensures the connection is opened, committed, and closed correctly.
     """
     STATE_DIR.mkdir(exist_ok=True)
-    conn = sqlite3.connect(DB_FILE)
+    db_file = get_db_path()
+    conn = sqlite3.connect(db_file)
     conn.row_factory = sqlite3.Row
     try:
         yield conn
@@ -28,77 +35,53 @@ def db_transaction():
 
 
 def initialize_database() -> None:
-    """Initializes the database with the required schema and handles migrations."""
-    with db_transaction() as conn:
-        cursor = conn.cursor()
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS insights (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp DATETIME DEFAULT (STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW')),
-                followers INTEGER,
-                following INTEGER,
-                tweet_count INTEGER DEFAULT 0
-            )
-        """)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS blocked_users (
-                user_id INTEGER PRIMARY KEY,
-                status TEXT DEFAULT 'PENDING',
-                updated_at DATETIME DEFAULT (STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW'))
-            )
-        """)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS following_users (
-                user_id INTEGER PRIMARY KEY,
-                status TEXT DEFAULT 'PENDING',
-                updated_at DATETIME DEFAULT (STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW'))
-            )
-        """)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS followers (
-                user_id INTEGER PRIMARY KEY,
-                updated_at DATETIME DEFAULT (STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW'))
-            )
-        """)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS unfollows (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER,
-                timestamp DATETIME DEFAULT (STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW'))
-            )
-        """)
+    """Initializes the database using the migration runner."""
 
-        # Migration logic
-        cursor.execute("PRAGMA table_info(insights)")
-        insight_columns = [row["name"] for row in cursor.fetchall()]
-        if "tweet_count" not in insight_columns:
-            logging.info("Migrating insights table: adding 'tweet_count' column.")
-            cursor.execute(
-                "ALTER TABLE insights ADD COLUMN tweet_count INTEGER DEFAULT 0"
-            )
+    from x_agent.migrations.runner import run_migrations
 
-        cursor.execute("PRAGMA table_info(blocked_users)")
-        columns = [row["name"] for row in cursor.fetchall()]
-        if "status" not in columns:
-            logging.info("Migrating blocked_users table: adding 'status' column.")
-            cursor.execute(
-                "ALTER TABLE blocked_users ADD COLUMN status TEXT DEFAULT 'PENDING'"
-            )
-        if "updated_at" not in columns:
-            logging.info("Migrating blocked_users table: adding 'updated_at' column.")
-            cursor.execute("ALTER TABLE blocked_users ADD COLUMN updated_at DATETIME")
-            cursor.execute(
-                "UPDATE blocked_users SET updated_at = (STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW')) WHERE updated_at IS NULL"
-            )
+    run_migrations()
 
-        if "unblocked_at" in columns:
-            logging.info("Migrating legacy data from 'unblocked_at' to 'status'.")
-            cursor.execute(
-                "UPDATE blocked_users SET status = 'UNBLOCKED' WHERE unblocked_at IS NOT NULL AND status = 'PENDING'"
-            )
-            cursor.execute("UPDATE blocked_users SET unblocked_at = NULL")
 
-    logging.info("Database initialized successfully.")
+def backup_database() -> Optional[str]:
+    """
+
+
+    Creates a backup of the current database.
+
+
+    Returns the path to the backup file if successful, None otherwise.
+
+
+    """
+
+    db_path = get_db_path()
+
+    if not db_path.exists():
+        logging.warning("No database found to backup.")
+
+        return None
+
+    backup_dir = STATE_DIR / "backups"
+
+    backup_dir.mkdir(parents=True, exist_ok=True)
+
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+
+    backup_name = f"{db_path.stem}_{timestamp}.db"
+
+    backup_path = backup_dir / backup_name
+
+    try:
+        shutil.copy2(db_path, backup_path)
+
+        logging.info(f"Database backed up to {backup_path}")
+
+        return str(backup_path)
+
+    except Exception as e:
+        logging.error(f"Failed to backup database: {e}")
+
+        return None
 
 
 def add_insight(followers: int, following: int, tweet_count: int = 0) -> None:

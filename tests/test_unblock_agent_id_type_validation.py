@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import MagicMock
-from src.x_agent.agents.unblock_agent import UnblockAgent
-from src.x_agent.services.x_service import XService
+from x_agent.agents.unblock_agent import UnblockAgent
+from x_agent.services.x_service import XService
 
 
 @pytest.fixture
