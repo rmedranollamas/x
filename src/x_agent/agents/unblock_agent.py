@@ -1,5 +1,6 @@
 import logging
 import asyncio
+import time
 from .base_agent import BaseAgent
 from ..services.x_service import XService
 from .. import database
@@ -111,6 +112,7 @@ class UnblockAgent(BaseAgent):
             f"Starting the unblocking process for {total_to_unblock_session} accounts..."
         )
 
+        start_time = time.time()
         sem = asyncio.Semaphore(20)
         # We'll collect results and update the DB in chunks to ensure progress is saved
         batch_size = 50
@@ -145,7 +147,14 @@ class UnblockAgent(BaseAgent):
                         status if status != "SUCCESS" else "UNBLOCKED",
                     )
 
+        end_time = time.time()
+        duration = end_time - start_time
+        total_processed = sum(session_stats.values())
+        rate = total_processed / duration if duration > 0 else 0
+
         logging.info("\n--- Unblocking Process Complete! ---")
+        logging.info(f"Time taken: {duration:.2f} seconds")
+        logging.info(f"Rate: {rate:.2f} accounts/second")
         logging.info(
             f"Total accounts unblocked in this session: {session_stats['SUCCESS']}"
         )
