@@ -113,6 +113,25 @@ def get_latest_insight() -> Optional[sqlite3.Row]:
         return cursor.fetchone()
 
 
+def get_insight_at_offset(days_ago: int) -> Optional[sqlite3.Row]:
+    """
+    Retrieves the insight record closest to the specified number of days ago.
+    """
+    with db_transaction() as conn:
+        cursor = conn.cursor()
+        # We look for the record closest to (NOW - days_ago) but not newer than it
+        cursor.execute(
+            """
+            SELECT * FROM insights
+            WHERE timestamp <= STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW', ?)
+            ORDER BY timestamp DESC
+            LIMIT 1
+            """,
+            (f"-{days_ago} days",),
+        )
+        return cursor.fetchone()
+
+
 def add_blocked_users(user_ids: set[int]) -> None:
     """Adds a set of blocked user IDs to the database."""
     if not user_ids:

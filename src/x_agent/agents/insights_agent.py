@@ -1,5 +1,6 @@
 import logging
 import asyncio
+import sqlite3
 from typing import Optional
 import tweepy
 from .base_agent import BaseAgent
@@ -44,11 +45,16 @@ class InsightsAgent(BaseAgent):
         current_followers = me_data.public_metrics.get("followers_count", 0)
         current_following = me_data.public_metrics.get("following_count", 0)
 
-        # Get the previous metrics from the database
-        latest_insight = await asyncio.to_thread(database.get_latest_insight)
+        # Get historical metrics from the database
+        comparisons = {
+            "Previous Run": await asyncio.to_thread(database.get_latest_insight),
+            "24h Ago": await asyncio.to_thread(database.get_insight_at_offset, 1),
+            "7d Ago": await asyncio.to_thread(database.get_insight_at_offset, 7),
+            "30d Ago": await asyncio.to_thread(database.get_insight_at_offset, 30),
+        }
 
         # Generate the report
-        self._generate_report(current_followers, current_following, latest_insight)
+        self._generate_report(current_followers, current_following, comparisons)
 
         # Save the new metrics to the database
         await asyncio.to_thread(
@@ -61,34 +67,40 @@ class InsightsAgent(BaseAgent):
         self,
         current_followers: int,
         current_following: int,
-        latest_insight: Optional[dict] = None,
+        comparisons: dict[str, Optional[sqlite3.Row]],
     ) -> None:
         """
-        Generates and prints a report comparing current and previous metrics.
-
-        Args:
-            current_followers: The current number of followers.
-            current_following: The current number of accounts being followed.
-            latest_insight: A dictionary-like object containing previous metrics.
+        Generates and prints a report comparing current and historical metrics.
         """
-        report_lines = ["\n--- Daily X Account Insights ---"]
+        print("\n--- Daily X Account Insights ---")
+        print(f"Current Followers: {current_followers}")
+        print(f"Current Following: {current_following}")
+        print("-" * 32)
 
-        if latest_insight:
-            prev_followers = latest_insight["followers"]
-            prev_following = latest_insight["following"]
+        has_any_history = False
+        for label, insight in comparisons.items():
+            if not insight:
+                continue
 
-            follower_change = current_followers - prev_followers
-            following_change = current_following - prev_following
+            has_any_history = True
+            prev_followers = insight["followers"]
+            prev_following = insight["following"]
 
-            report_lines.append(
-                f"Followers: {current_followers} ({follower_change:+.0f})"
+            # Avoid comparing with self if the latest insight is the same as current
+            # (though we save AFTER reporting, so 'Previous Run' is usually truly previous)
+            f_delta = current_followers - prev_followers
+            f_sign = "+" if f_delta >= 0 else ""
+
+            l_delta = current_following - prev_following
+            l_sign = "+" if l_delta >= 0 else ""
+
+            # Check if there's actually a difference to report for this timeframe
+            # or if it's the very first entry.
+            print(
+                f"{label:12} | Followers: {f_sign}{f_delta:4} | Following: {l_sign}{l_delta:4}"
             )
-            report_lines.append(
-                f"Following: {current_following} ({following_change:+.0f})"
-            )
-        else:
-            report_lines.append(f"Followers: {current_followers} (First run)")
-            report_lines.append(f"Following: {current_following} (First run)")
 
-        report_lines.append("--------------------------------\n")
-        print("\n".join(report_lines))
+        if not has_any_history:
+            print("No historical data available yet. This is your first run!")
+
+        print("-" * 32 + "\n")
