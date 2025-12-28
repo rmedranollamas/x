@@ -36,7 +36,8 @@ def initialize_database() -> None:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 timestamp DATETIME DEFAULT (STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW')),
                 followers INTEGER,
-                following INTEGER
+                following INTEGER,
+                tweet_count INTEGER DEFAULT 0
             )
         """)
         cursor.execute("""
@@ -68,6 +69,14 @@ def initialize_database() -> None:
         """)
 
         # Migration logic
+        cursor.execute("PRAGMA table_info(insights)")
+        insight_columns = [row["name"] for row in cursor.fetchall()]
+        if "tweet_count" not in insight_columns:
+            logging.info("Migrating insights table: adding 'tweet_count' column.")
+            cursor.execute(
+                "ALTER TABLE insights ADD COLUMN tweet_count INTEGER DEFAULT 0"
+            )
+
         cursor.execute("PRAGMA table_info(blocked_users)")
         columns = [row["name"] for row in cursor.fetchall()]
         if "status" not in columns:
@@ -92,15 +101,17 @@ def initialize_database() -> None:
     logging.info("Database initialized successfully.")
 
 
-def add_insight(followers: int, following: int) -> None:
+def add_insight(followers: int, following: int, tweet_count: int = 0) -> None:
     """Adds a new insight record to the database."""
     with db_transaction() as conn:
         cursor = conn.cursor()
         cursor.execute(
-            "INSERT INTO insights (followers, following) VALUES (?, ?)",
-            (followers, following),
+            "INSERT INTO insights (followers, following, tweet_count) VALUES (?, ?, ?)",
+            (followers, following, tweet_count),
         )
-    logging.info(f"Added new insight: {followers} followers, {following} following.")
+    logging.info(
+        f"Added new insight: {followers} followers, {following} following, {tweet_count} tweets."
+    )
 
 
 def get_latest_insight() -> Optional[sqlite3.Row]:

@@ -188,7 +188,9 @@ class XService:
 
     async def get_me(self) -> tweepy.Response:
         """Retrieves the authenticated user's information."""
-        return await self.client.get_me(user_fields=["public_metrics"])
+        return await self.client.get_me(
+            user_fields=["public_metrics", "created_at", "description"]
+        )
 
     async def get_following_user_ids(self) -> set[int]:
         """
