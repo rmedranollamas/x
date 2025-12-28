@@ -114,7 +114,11 @@ class XService:
         try:
             # client.unblock corresponds to DELETE /2/users/:id/blocking/:target_user_id
             await self.ensure_initialized()
-            await self.client.unblock(id=self.user_id, target_user_id=user_id)
+            await self.client.request(
+                "DELETE",
+                f"/2/users/{self.user_id}/blocking/{user_id}",
+                user_auth=True,
+            )
             return "SUCCESS"
         except tweepy.errors.NotFound as e:
             logging.warning(
