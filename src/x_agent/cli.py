@@ -22,10 +22,17 @@ def _run_agent(agent_class, debug: bool, **kwargs):
     Helper to initialize service and run an agent.
     """
     setup_logging(debug)
+    x_service = XService()
+    agent = agent_class(x_service, **kwargs)
+
+    async def _async_run():
+        try:
+            await agent.execute()
+        finally:
+            await x_service.close()
+
     try:
-        x_service = XService()
-        agent = agent_class(x_service, **kwargs)
-        asyncio.run(agent.execute())
+        asyncio.run(_async_run())
     except Exception as e:
         logging.error(f"An unexpected error occurred: {e}", exc_info=True)
         sys.exit(1)
@@ -63,22 +70,14 @@ def insights(
 
 @app.command()
 def unfollow(
-    non_followers: bool = typer.Option(
-        True, help="Only unfollow users who don't follow you back."
-    ),
-    refresh: bool = typer.Option(
-        False,
-        "--refresh",
-        help="Re-fetch following/follower IDs from API, ignoring local cache.",
-    ),
     debug: bool = typer.Option(
         False, "--debug", help="Enable debug logging for detailed output."
     ),
 ):
     """
-    Run the unfollow agent to clean up your following list.
+    Run the unfollow agent to detect who has unfollowed you.
     """
-    _run_agent(UnfollowAgent, debug, non_followers_only=non_followers, refresh=refresh)
+    _run_agent(UnfollowAgent, debug)
 
 
 @app.command(name="blocked-ids")

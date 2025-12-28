@@ -29,6 +29,7 @@ class XService:
         )
         self.api_v1 = tweepy.API(auth, wait_on_rate_limit=True)
         self.user_id: int | None = None
+        self.v1_lock = asyncio.Lock()
 
     async def initialize(self) -> None:
         """Authenticates and retrieves the current user's ID."""
@@ -48,6 +49,12 @@ class XService:
         if self.user_id is None:
             await self.initialize()
 
+    async def close(self) -> None:
+        """Closes the underlying async client session."""
+        if self.client and hasattr(self.client, "session") and self.client.session:
+            await self.client.session.close()
+            logging.debug("XService session closed.")
+
     async def get_blocked_user_ids(self) -> set[int]:
         """
         Fetches the complete list of blocked user IDs using v1.1 API.
@@ -58,9 +65,10 @@ class XService:
 
         try:
             while cursor != 0:
-                ids, (_, next_cursor) = await asyncio.to_thread(
-                    self.api_v1.get_blocked_ids, cursor=cursor
-                )
+                async with self.v1_lock:
+                    ids, (_, next_cursor) = await asyncio.to_thread(
+                        self.api_v1.get_blocked_ids, cursor=cursor
+                    )
                 blocked_user_ids.update(ids)
                 cursor = next_cursor
                 if len(blocked_user_ids) % 1000 == 0 or cursor == 0:
@@ -86,7 +94,8 @@ class XService:
             None: Unable to verify (Unexpected error).
         """
         try:
-            await asyncio.to_thread(self.api_v1.get_user, user_id=user_id)
+            async with self.v1_lock:
+                await asyncio.to_thread(self.api_v1.get_user, user_id=user_id)
             return True
         except tweepy.errors.NotFound:
             return False
@@ -112,11 +121,12 @@ class XService:
 
         # Strategy 1: V2 Unblock
         try:
-            # client.unblock corresponds to DELETE /2/users/:id/blocking/:target_user_id
+            # client.unblock is missing in some Tweepy versions or AsyncClient
             await self.ensure_initialized()
             await self.client.request(
                 "DELETE",
                 f"/2/users/{self.user_id}/blocking/{user_id}",
+                params={},
                 user_auth=True,
             )
             return "SUCCESS"
@@ -129,16 +139,17 @@ class XService:
 
         # Strategy 2: Toggle Block Fix
         try:
-            await asyncio.to_thread(self.api_v1.create_block, user_id=user_id)
-            await asyncio.to_thread(self.api_v1.destroy_block, user_id=user_id)
+            async with self.v1_lock:
+                await asyncio.to_thread(self.api_v1.create_block, user_id=user_id)
+                await asyncio.to_thread(self.api_v1.destroy_block, user_id=user_id)
             return "SUCCESS"
         except Exception as e:
             logging.warning(f"Toggle Block Fix failed for {user_id}: {e}")
 
         logging.warning(
-            f"All recovery strategies failed for {user_id}. Will retry in next session."
+            f"All recovery strategies failed for {user_id} (True Zombie Block). Skipping to avoid infinite retries."
         )
-        return "FAILED"
+        return "NOT_FOUND"
 
     async def unblock_user(self, user_id: int) -> str:
         """
@@ -146,7 +157,8 @@ class XService:
         Returns "SUCCESS", "NOT_FOUND", or "FAILED".
         """
         try:
-            await asyncio.to_thread(self.api_v1.destroy_block, user_id=user_id)
+            async with self.v1_lock:
+                await asyncio.to_thread(self.api_v1.destroy_block, user_id=user_id)
             return "SUCCESS"
         except tweepy.errors.NotFound as e:
             logging.warning(
@@ -184,9 +196,10 @@ class XService:
 
         try:
             while cursor != 0:
-                ids, (_, next_cursor) = await asyncio.to_thread(
-                    self.api_v1.get_friend_ids, cursor=cursor
-                )
+                async with self.v1_lock:
+                    ids, (_, next_cursor) = await asyncio.to_thread(
+                        self.api_v1.get_friend_ids, cursor=cursor
+                    )
                 following_ids.update(ids)
                 cursor = next_cursor
                 if len(following_ids) % 1000 == 0 or cursor == 0:
@@ -214,9 +227,10 @@ class XService:
 
         try:
             while cursor != 0:
-                ids, (_, next_cursor) = await asyncio.to_thread(
-                    self.api_v1.get_follower_ids, cursor=cursor
-                )
+                async with self.v1_lock:
+                    ids, (_, next_cursor) = await asyncio.to_thread(
+                        self.api_v1.get_follower_ids, cursor=cursor
+                    )
                 follower_ids.update(ids)
                 cursor = next_cursor
                 if len(follower_ids) % 1000 == 0 or cursor == 0:
@@ -239,7 +253,8 @@ class XService:
         Returns "SUCCESS" or "FAILED".
         """
         try:
-            await asyncio.to_thread(self.api_v1.destroy_friendship, user_id=user_id)
+            async with self.v1_lock:
+                await asyncio.to_thread(self.api_v1.destroy_friendship, user_id=user_id)
             return "SUCCESS"
         except Exception as e:
             logging.warning(f"Failed to unfollow {user_id}: {e}")

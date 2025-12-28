@@ -114,7 +114,6 @@ class UnblockAgent(BaseAgent):
         sem = asyncio.Semaphore(20)
         # We'll collect results and update the DB in chunks to ensure progress is saved
         batch_size = 50
-        status_map = {"SUCCESS": [], "NOT_FOUND": [], "FAILED": []}
         session_stats = {"SUCCESS": 0, "NOT_FOUND": 0, "FAILED": 0}
 
         async def unblock_worker(user_id: int) -> tuple[int, str]:
@@ -141,7 +140,9 @@ class UnblockAgent(BaseAgent):
             for status, uids in chunk_status_map.items():
                 if uids:
                     await asyncio.to_thread(
-                        database.update_user_statuses, uids, status if status != "SUCCESS" else "UNBLOCKED"
+                        database.update_user_statuses,
+                        uids,
+                        status if status != "SUCCESS" else "UNBLOCKED",
                     )
 
         logging.info("\n--- Unblocking Process Complete! ---")

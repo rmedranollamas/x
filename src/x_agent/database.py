@@ -53,6 +53,19 @@ def initialize_database() -> None:
                 updated_at DATETIME DEFAULT (STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW'))
             )
         """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS followers (
+                user_id INTEGER PRIMARY KEY,
+                updated_at DATETIME DEFAULT (STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW'))
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS unfollows (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                timestamp DATETIME DEFAULT (STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW'))
+            )
+        """)
 
         # Migration logic
         cursor.execute("PRAGMA table_info(blocked_users)")
@@ -227,3 +240,31 @@ def update_following_status(user_ids: List[int], status: str) -> None:
             "UPDATE following_users SET status = ?, updated_at = (STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW')) WHERE user_id = ?",
             data,
         )
+
+
+def get_all_follower_ids() -> set[int]:
+    """Retrieves all user IDs from the followers table."""
+    with db_transaction() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT user_id FROM followers")
+        rows = cursor.fetchall()
+        return {row["user_id"] for row in rows}
+
+
+def replace_followers(user_ids: set[int]) -> None:
+    """Replaces the entire followers table with the given set of IDs."""
+    with db_transaction() as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM followers")
+        data = [(uid,) for uid in user_ids]
+        cursor.executemany("INSERT INTO followers (user_id) VALUES (?)", data)
+
+
+def log_unfollows(user_ids: List[int]) -> None:
+    """Logs multiple unfollow events into the unfollows table."""
+    if not user_ids:
+        return
+    with db_transaction() as conn:
+        cursor = conn.cursor()
+        data = [(uid,) for uid in user_ids]
+        cursor.executemany("INSERT INTO unfollows (user_id) VALUES (?)", data)

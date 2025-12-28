@@ -86,9 +86,7 @@ def test_unfollow_command(mock_x_service, mock_agents):
                 result = runner.invoke(app, ["unfollow"])
 
                 assert result.exit_code == 0
-                mock_unfollow_cls.assert_called_once_with(
-                    mock_x_service.return_value, non_followers_only=True, refresh=False
-                )
+                mock_unfollow_cls.assert_called_once_with(mock_x_service.return_value)
                 mock_run.assert_called_once()
 
 

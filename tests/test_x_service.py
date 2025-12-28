@@ -24,6 +24,9 @@ def mock_async_client():
         return_value=MagicMock(data=MagicMock(id=12345, username="testuser"))
     )
     client.request = AsyncMock()
+    # Mocking session for close()
+    client.session = MagicMock()
+    client.session.close = AsyncMock()
     return client
 
 
@@ -107,6 +110,7 @@ async def test_unblock_user_not_found(x_service, mock_api_v1):
 @pytest.mark.asyncio
 async def test_unblock_user_zombie_fixed_v2(x_service, mock_api_v1, mock_async_client):
     """Test unblock_user handles Zombie Block using V2 fallback."""
+    x_service.user_id = 12345
     mock_api_v1.destroy_block.side_effect = [
         tweepy.errors.NotFound(MagicMock()),  # Initial try
     ]
@@ -117,7 +121,7 @@ async def test_unblock_user_zombie_fixed_v2(x_service, mock_api_v1, mock_async_c
 
     assert result == "SUCCESS"
     mock_async_client.request.assert_awaited_once_with(
-        "DELETE", "/2/users/12345/blocking/999", user_auth=True
+        "DELETE", "/2/users/12345/blocking/999", params={}, user_auth=True
     )
 
 
@@ -126,6 +130,7 @@ async def test_unblock_user_zombie_fixed_toggle(
     x_service, mock_api_v1, mock_async_client
 ):
     """Test unblock_user handles Zombie Block using Toggle fix."""
+    x_service.user_id = 12345
     mock_api_v1.destroy_block.side_effect = [
         tweepy.errors.NotFound(MagicMock()),  # Initial try
         MagicMock(),  # Destroy block in toggle success
@@ -140,7 +145,7 @@ async def test_unblock_user_zombie_fixed_toggle(
 
     assert result == "SUCCESS"
     mock_async_client.request.assert_awaited_once_with(
-        "DELETE", "/2/users/12345/blocking/999", user_auth=True
+        "DELETE", "/2/users/12345/blocking/999", params={}, user_auth=True
     )
     mock_api_v1.create_block.assert_called_once_with(user_id=999)
 
