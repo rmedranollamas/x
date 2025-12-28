@@ -93,7 +93,7 @@ class UnfollowAgent(BaseAgent):
 
     async def _unfollow_user_ids(self, ids_to_unfollow: list[int]) -> None:
         """
-        Iterates through a list of user IDs and unfollows each one concurrently.
+        Iterates through a list of user IDs and unfollows each one concurrently in batches.
         """
         total_session = len(ids_to_unfollow)
         logging.info(
@@ -101,6 +101,8 @@ class UnfollowAgent(BaseAgent):
         )
 
         sem = asyncio.Semaphore(20)
+        batch_size = 50
+        session_stats = {"SUCCESS": 0, "FAILED": 0}
 
         async def unfollow_worker(user_id: int) -> tuple[int, str]:
             async with sem:
@@ -110,31 +112,36 @@ class UnfollowAgent(BaseAgent):
                 )
                 return user_id, status
 
-        tasks = [unfollow_worker(uid) for uid in ids_to_unfollow]
-        results = await asyncio.gather(*tasks)
+        for i in range(0, len(ids_to_unfollow), batch_size):
+            chunk = ids_to_unfollow[i : i + batch_size]
+            tasks = [unfollow_worker(uid) for uid in chunk]
+            results = await asyncio.gather(*tasks)
 
-        # Group results by status
-        status_map = {}
-        for user_id, status in results:
-            status_map.setdefault(status, []).append(user_id)
+            # Process chunk results
+            chunk_status_map = {}
+            for user_id, status in results:
+                chunk_status_map.setdefault(status, []).append(user_id)
+                if status in session_stats:
+                    session_stats[status] += 1
+                else:
+                    session_stats[status] = 1
 
-        # Update database based on status
-        for status, uids in status_map.items():
-            db_status = "UNFOLLOWED" if status == "SUCCESS" else status
-            await asyncio.to_thread(database.update_following_status, uids, db_status)
-
-        session_success = len(status_map.get("SUCCESS", []))
-        session_failed = len(status_map.get("FAILED", []))
+            # Update database based on status for this chunk
+            for status, uids in chunk_status_map.items():
+                db_status = "UNFOLLOWED" if status == "SUCCESS" else status
+                await asyncio.to_thread(database.update_following_status, uids, db_status)
 
         logging.info("\n--- Unfollowing Process Complete! ---")
-        logging.info(f"Total accounts unfollowed in this session: {session_success}")
-        if session_failed > 0:
+        logging.info(f"Total accounts unfollowed in this session: {session_stats.get('SUCCESS', 0)}")
+        
+        failed_count = session_stats.get("FAILED", 0)
+        if failed_count > 0:
             logging.warning(
-                f"Failed to unfollow {session_failed} accounts. They will be retried on the next run."
+                f"Failed to unfollow {failed_count} accounts. They will be retried on the next run."
             )
 
         other_statuses = [
-            status for status in status_map if status not in ("SUCCESS", "FAILED")
+            status for status in session_stats if status not in ("SUCCESS", "FAILED")
         ]
         for status in other_statuses:
-            logging.info(f"Accounts with status '{status}': {len(status_map[status])}")
+            logging.info(f"Accounts with status '{status}': {session_stats[status]}")

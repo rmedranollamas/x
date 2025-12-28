@@ -29,12 +29,14 @@ class SingleLineUpdateHandler(logging.StreamHandler):
             ):
                 return
 
+            is_tty = hasattr(self.stream, "isatty") and self.stream.isatty()
             message = self.format(record)
-            if hasattr(record, "single_line"):
+
+            if hasattr(record, "single_line") and is_tty:
                 # Clear the previous line if necessary
                 if self._last_single_line_length > len(message):
                     print(
-                        " " * self._last_single_line_length,
+                        "\r" + " " * self._last_single_line_length,
                         end="\r",
                         file=self.stream,
                         flush=True,
@@ -42,14 +44,19 @@ class SingleLineUpdateHandler(logging.StreamHandler):
                 print(f"\r{message}", end="", file=self.stream, flush=True)
                 self._last_single_line_length = len(message)
             else:
-                # If a non-single-line record comes, clear any active single-line message
+                # If a non-single-line record comes, or we're not a TTY
                 if self._last_single_line_length > 0:
-                    print(
-                        " " * self._last_single_line_length,
-                        end="\r",
-                        file=self.stream,
-                        flush=True,
-                    )
+                    if is_tty:
+                        # Clear line and move back to start
+                        print(
+                            "\r" + " " * self._last_single_line_length,
+                            end="\r",
+                            file=self.stream,
+                            flush=True,
+                        )
+                    else:
+                        # Just ensure we start a new line if we were mid-line
+                        print(file=self.stream, flush=True)
                     self._last_single_line_length = 0
                 print(message, file=self.stream, flush=True)
         except (ValueError, RuntimeError, AttributeError):

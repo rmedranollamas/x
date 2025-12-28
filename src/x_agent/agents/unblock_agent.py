@@ -104,7 +104,7 @@ class UnblockAgent(BaseAgent):
         ids_to_unblock: list[int],
     ) -> None:
         """
-        Iterates through a list of user IDs and unblocks each one concurrently.
+        Iterates through a list of user IDs and unblocks each one concurrently in batches.
         """
         total_to_unblock_session = len(ids_to_unblock)
         logging.info(
@@ -112,53 +112,47 @@ class UnblockAgent(BaseAgent):
         )
 
         sem = asyncio.Semaphore(20)
+        # We'll collect results and update the DB in chunks to ensure progress is saved
+        batch_size = 50
+        status_map = {"SUCCESS": [], "NOT_FOUND": [], "FAILED": []}
+        session_stats = {"SUCCESS": 0, "NOT_FOUND": 0, "FAILED": 0}
 
         async def unblock_worker(user_id: int) -> tuple[int, str]:
             async with sem:
                 status = await self.x_service.unblock_user(user_id)
-                # Log immediate progress for long sessions
                 logging.info(
                     f"Processed ID {user_id}: {status}", extra={"single_line": True}
                 )
                 return user_id, status
 
-        tasks = [unblock_worker(uid) for uid in ids_to_unblock]
-        results = await asyncio.gather(*tasks)
+        for i in range(0, len(ids_to_unblock), batch_size):
+            chunk = ids_to_unblock[i : i + batch_size]
+            tasks = [unblock_worker(uid) for uid in chunk]
+            results = await asyncio.gather(*tasks)
 
-        # Group results by status
-        status_map = {"SUCCESS": [], "NOT_FOUND": [], "FAILED": []}
-        for user_id, status in results:
-            if status in status_map:
-                status_map[status].append(user_id)
+            # Process chunk results
+            chunk_status_map = {"SUCCESS": [], "NOT_FOUND": [], "FAILED": []}
+            for user_id, status in results:
+                if status in chunk_status_map:
+                    chunk_status_map[status].append(user_id)
+                    session_stats[status] += 1
 
-        # Batch update database
-        if status_map["SUCCESS"]:
-            await asyncio.to_thread(
-                database.update_user_statuses, status_map["SUCCESS"], "UNBLOCKED"
-            )
-        if status_map["NOT_FOUND"]:
-            await asyncio.to_thread(
-                database.update_user_statuses, status_map["NOT_FOUND"], "NOT_FOUND"
-            )
-        if status_map["FAILED"]:
-            await asyncio.to_thread(
-                database.update_user_statuses, status_map["FAILED"], "FAILED"
-            )
-
-        # Final report
-        session_unblocked_count = len(status_map["SUCCESS"])
-        session_not_found_count = len(status_map["NOT_FOUND"])
-        session_failed_count = len(status_map["FAILED"])
+            # Update database for this chunk
+            for status, uids in chunk_status_map.items():
+                if uids:
+                    await asyncio.to_thread(
+                        database.update_user_statuses, uids, status if status != "SUCCESS" else "UNBLOCKED"
+                    )
 
         logging.info("\n--- Unblocking Process Complete! ---")
         logging.info(
-            f"Total accounts unblocked in this session: {session_unblocked_count}"
+            f"Total accounts unblocked in this session: {session_stats['SUCCESS']}"
         )
-        if session_not_found_count > 0:
+        if session_stats["NOT_FOUND"] > 0:
             logging.info(
-                f"Accounts not found (deleted/suspended): {session_not_found_count}"
+                f"Accounts not found (deleted/suspended): {session_stats['NOT_FOUND']}"
             )
-        if session_failed_count > 0:
+        if session_stats["FAILED"] > 0:
             logging.warning(
-                f"Failed to unblock {session_failed_count} accounts. They will be retried on the next run."
+                f"Failed to unblock {session_stats['FAILED']} accounts. They will be retried on the next run."
             )
