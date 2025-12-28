@@ -135,7 +135,12 @@ class XService:
                 f"V2 Unblock ALSO returned 404 for {user_id}. API says: {e}"
             )
         except Exception as e:
-            logging.warning(f"V2 Unblock failed for {user_id}: {e}")
+            if "unexpected mimetype: text/html" in str(e):
+                logging.warning(
+                    f"V2 Unblock failed for {user_id}: API returned HTML (likely 404/500) instead of JSON."
+                )
+            else:
+                logging.warning(f"V2 Unblock failed for {user_id}: {e}")
 
         # Strategy 2: Toggle Block Fix
         try:

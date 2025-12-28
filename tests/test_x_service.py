@@ -151,6 +151,37 @@ async def test_unblock_user_zombie_fixed_toggle(
 
 
 @pytest.mark.asyncio
+async def test_unblock_user_zombie_v2_json_error(
+    x_service, mock_api_v1, mock_async_client
+):
+    """Test unblock_user handles V2 JSON decode error (HTML response) gracefully."""
+    x_service.user_id = 12345
+    mock_api_v1.destroy_block.side_effect = [
+        tweepy.errors.NotFound(MagicMock()),  # Initial try
+    ]
+    mock_api_v1.get_user.return_value = MagicMock()  # User exists
+
+    # Simulate the specific JSON decode error from Tweepy/simplejson
+    mock_async_client.request.side_effect = Exception(
+        "Attempt to decode JSON with unexpected mimetype: text/html;charset=utf-8"
+    )
+
+    # It should fall through to Strategy 2 (Toggle Block)
+    mock_api_v1.create_block.return_value = MagicMock()
+    mock_api_v1.destroy_block.side_effect = [
+        tweepy.errors.NotFound(MagicMock()),  # Initial
+        MagicMock(),  # Toggle fix destroy
+    ]
+
+    result = await x_service.unblock_user(999)
+
+    # It succeeds because Strategy 2 works
+    assert result == "SUCCESS"
+    mock_async_client.request.assert_awaited_once()
+    mock_api_v1.create_block.assert_called_once_with(user_id=999)
+
+
+@pytest.mark.asyncio
 async def test_unblock_user_failure(x_service, mock_api_v1):
     """Test unblock_user returns FAILED on generic error."""
     mock_api_v1.destroy_block.side_effect = Exception("Generic error")
