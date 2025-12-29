@@ -7,7 +7,7 @@ from tenacity import (
     retry,
     stop_after_attempt,
     wait_exponential,
-    retry_if_exception_type,
+    retry_if_exception,
 )
 from ..config import settings
 
@@ -80,9 +80,7 @@ class XService:
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=4, max=10),
-        retry=retry_if_exception_type(
-            Exception
-        ),  # We filter inside is_transient_error ideally, but explicit check below is better
+        retry=retry_if_exception(is_transient_error),
         reraise=True,
     )
     async def get_blocked_user_ids(self) -> set[int]:
@@ -184,7 +182,7 @@ class XService:
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=5),
-        retry=retry_if_exception_type(Exception),
+        retry=retry_if_exception(is_transient_error),
         reraise=True,
     )
     async def unblock_user(self, user_id: int) -> str:
@@ -229,7 +227,7 @@ class XService:
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=4, max=10),
-        retry=retry_if_exception_type(Exception),
+        retry=retry_if_exception(is_transient_error),
         reraise=True,
     )
     async def get_following_user_ids(self) -> set[int]:
@@ -266,7 +264,7 @@ class XService:
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=4, max=10),
-        retry=retry_if_exception_type(Exception),
+        retry=retry_if_exception(is_transient_error),
         reraise=True,
     )
     async def get_follower_user_ids(self) -> set[int]:
@@ -303,7 +301,7 @@ class XService:
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=5),
-        retry=retry_if_exception_type(Exception),
+        retry=retry_if_exception(is_transient_error),
         reraise=True,
     )
     async def unfollow_user(self, user_id: int) -> str:

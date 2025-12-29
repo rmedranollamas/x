@@ -64,14 +64,16 @@ class UnblockAgent(BaseAgent):
 
             if status == "SUCCESS":
                 logging.info(f"Successfully unblocked {self.user_id}.")
-                await asyncio.to_thread(
-                    self.db.update_user_status, self.user_id, "UNBLOCKED"
-                )
+                if not self.dry_run:
+                    await asyncio.to_thread(
+                        self.db.update_user_status, self.user_id, "UNBLOCKED"
+                    )
             else:
                 logging.error(f"Failed to unblock {self.user_id}: {status}")
-                await asyncio.to_thread(
-                    self.db.update_user_status, self.user_id, "FAILED"
-                )
+                if not self.dry_run:
+                    await asyncio.to_thread(
+                        self.db.update_user_status, self.user_id, "FAILED"
+                    )
             return
 
         logging.info("--- X Unblock Agent (Async) ---")
@@ -166,13 +168,14 @@ class UnblockAgent(BaseAgent):
                     session_stats[status] += 1
 
             # Update database for this chunk
-            for status, uids in chunk_status_map.items():
-                if uids:
-                    await asyncio.to_thread(
-                        self.db.update_user_statuses,
-                        uids,
-                        status if status != "SUCCESS" else "UNBLOCKED",
-                    )
+            if not self.dry_run:
+                for status, uids in chunk_status_map.items():
+                    if uids:
+                        await asyncio.to_thread(
+                            self.db.update_user_statuses,
+                            uids,
+                            status if status != "SUCCESS" else "UNBLOCKED",
+                        )
 
         end_time = time.time()
         duration = end_time - start_time

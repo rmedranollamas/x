@@ -47,12 +47,9 @@ async def test_unblock_agent_dry_run(mock_x_service, mock_db_manager, caplog):
     assert "[Dry Run] Would unblock 101" in caplog.text
     assert "[Dry Run] Would unblock 102" in caplog.text
 
-    # Verify DB update was still called (as it tracks progress even in dry run in my current implementation)
-    # Actually, should it update the DB in dry run?
-    # In my implementation of UnblockAgent:
-    # await asyncio.to_thread(self.db.update_user_statuses, uids, status if status != "SUCCESS" else "UNBLOCKED")
-    # Yes, it does. This allows the user to see what would be updated.
-    assert mock_db_manager.update_user_statuses.called
+    # Verify no DB update calls were made
+    assert not mock_db_manager.update_user_statuses.called
+    assert not mock_db_manager.update_user_status.called
 
 
 @pytest.mark.asyncio
