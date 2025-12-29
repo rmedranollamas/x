@@ -2,11 +2,13 @@ import logging
 import asyncio
 import sqlite3
 import time
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 import tweepy
 from .base_agent import BaseAgent
 from ..services.x_service import XService
-from .. import database
+
+if TYPE_CHECKING:
+    from ..database import DatabaseManager
 
 
 class InsightsAgent(BaseAgent):
@@ -14,20 +16,24 @@ class InsightsAgent(BaseAgent):
 
     agent_name = "insights"
 
-    def __init__(self, x_service: XService) -> None:
+    def __init__(
+        self, x_service: XService, db_manager: "DatabaseManager", **kwargs
+    ) -> None:
         """
-        Initializes the agent with a service to interact with the X API.
+        Initializes the agent.
 
         Args:
             x_service: An instance of XService.
+            db_manager: Database Manager.
         """
+        super().__init__(db_manager)
         self.x_service = x_service
 
     async def execute(self) -> None:
         """Runs the insights agent to generate and store the report."""
         logging.info("Starting the insights agent...")
 
-        await asyncio.to_thread(database.initialize_database)
+        await asyncio.to_thread(self.db.initialize_database)
 
         try:
             if not self.x_service.user_id:
@@ -50,10 +56,10 @@ class InsightsAgent(BaseAgent):
 
         # Get historical metrics from the database
         comparisons = {
-            "Previous": await asyncio.to_thread(database.get_latest_insight),
-            "24h Ago": await asyncio.to_thread(database.get_insight_at_offset, 1),
-            "7d Ago": await asyncio.to_thread(database.get_insight_at_offset, 7),
-            "30d Ago": await asyncio.to_thread(database.get_insight_at_offset, 30),
+            "Previous": await asyncio.to_thread(self.db.get_latest_insight),
+            "24h Ago": await asyncio.to_thread(self.db.get_insight_at_offset, 1),
+            "7d Ago": await asyncio.to_thread(self.db.get_insight_at_offset, 7),
+            "30d Ago": await asyncio.to_thread(self.db.get_insight_at_offset, 30),
         }
 
         # Generate the report
@@ -63,7 +69,7 @@ class InsightsAgent(BaseAgent):
 
         # Save the new metrics to the database
         await asyncio.to_thread(
-            database.add_insight,
+            self.db.add_insight,
             current_followers,
             current_following,
             current_tweets,

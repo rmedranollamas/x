@@ -3,6 +3,7 @@ import logging
 from unittest.mock import MagicMock, AsyncMock
 from x_agent.agents.blocked_ids_agent import BlockedIdsAgent
 from x_agent.services.x_service import XService
+from x_agent.database import DatabaseManager
 
 
 @pytest.fixture
@@ -13,8 +14,13 @@ def mock_x_service():
 
 
 @pytest.fixture
-def blocked_ids_agent(mock_x_service):
-    return BlockedIdsAgent(mock_x_service)
+def mock_db_manager():
+    return MagicMock(spec=DatabaseManager)
+
+
+@pytest.fixture
+def blocked_ids_agent(mock_x_service, mock_db_manager):
+    return BlockedIdsAgent(x_service=mock_x_service, db_manager=mock_db_manager)
 
 
 @pytest.mark.asyncio

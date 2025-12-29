@@ -1,6 +1,10 @@
 import logging
+from typing import TYPE_CHECKING
 from .base_agent import BaseAgent
 from ..services.x_service import XService
+
+if TYPE_CHECKING:
+    from ..database import DatabaseManager
 
 
 class BlockedIdsAgent(BaseAgent):
@@ -8,13 +12,17 @@ class BlockedIdsAgent(BaseAgent):
     An agent responsible for fetching and printing the list of blocked user IDs.
     """
 
-    def __init__(self, x_service: XService) -> None:
+    def __init__(
+        self, x_service: XService, db_manager: "DatabaseManager", **kwargs
+    ) -> None:
         """
-        Initializes the agent with a service to interact with the X API.
+        Initializes the agent.
 
         Args:
             x_service: An instance of XService.
+            db_manager: Database Manager.
         """
+        super().__init__(db_manager)
         self.x_service = x_service
 
     async def execute(self) -> None:

@@ -1,8 +1,11 @@
 import logging
 import asyncio
+from typing import TYPE_CHECKING
 from .base_agent import BaseAgent
 from ..services.x_service import XService
-from .. import database
+
+if TYPE_CHECKING:
+    from ..database import DatabaseManager
 
 
 class UnfollowAgent(BaseAgent):
@@ -14,15 +17,21 @@ class UnfollowAgent(BaseAgent):
     def __init__(
         self,
         x_service: XService,
+        db_manager: "DatabaseManager",
+        dry_run: bool = False,
         **kwargs,
     ) -> None:
         """
-        Initializes the agent with a service to interact with the X API.
+        Initializes the agent.
 
         Args:
             x_service: An instance of XService.
+            db_manager: Database Manager.
+            dry_run: If True, simulate actions.
         """
+        super().__init__(db_manager)
         self.x_service = x_service
+        self.dry_run = dry_run
 
     async def execute(self) -> None:
         """
@@ -34,7 +43,7 @@ class UnfollowAgent(BaseAgent):
         """
         logging.info("--- X Unfollow Detection Agent ---")
         await self.x_service.ensure_initialized()
-        await asyncio.to_thread(database.initialize_database)
+        await asyncio.to_thread(self.db.initialize_database)
 
         # 1) Get current follower list from the API
         logging.info("Fetching current followers from X API...")
@@ -42,7 +51,7 @@ class UnfollowAgent(BaseAgent):
 
         # 2) Compare to the follower list stored on the DB
         logging.info("Comparing with previously stored followers...")
-        previous_followers = await asyncio.to_thread(database.get_all_follower_ids)
+        previous_followers = await asyncio.to_thread(self.db.get_all_follower_ids)
 
         if not previous_followers:
             logging.info(
@@ -56,15 +65,23 @@ class UnfollowAgent(BaseAgent):
             new_followers_count = len(new_followers)
 
         # 3) Store the new follower list
-        logging.info("Updating follower list in database...")
-        await asyncio.to_thread(database.replace_followers, current_followers)
+        if self.dry_run:
+            logging.info("[Dry Run] Would update follower list in database.")
+        else:
+            logging.info("Updating follower list in database...")
+            await asyncio.to_thread(self.db.replace_followers, current_followers)
 
         # 4) Show stats and store unfollow events
         self._report_stats(len(current_followers), unfollowed_ids, new_followers_count)
 
         if unfollowed_ids:
-            logging.info(f"Logging {len(unfollowed_ids)} unfollow events...")
-            await asyncio.to_thread(database.log_unfollows, list(unfollowed_ids))
+            if self.dry_run:
+                logging.info(
+                    f"[Dry Run] Would log {len(unfollowed_ids)} unfollow events."
+                )
+            else:
+                logging.info(f"Logging {len(unfollowed_ids)} unfollow events...")
+                await asyncio.to_thread(self.db.log_unfollows, list(unfollowed_ids))
 
         logging.info("Unfollow detection completed.")
 

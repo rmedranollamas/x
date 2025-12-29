@@ -3,7 +3,29 @@ import asyncio
 import logging
 import tweepy.asynchronous
 import tweepy
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception,
+)
 from ..config import settings
+
+
+def is_transient_error(exception):
+    """
+    Returns True if the exception is likely a transient network/server error.
+    """
+    if isinstance(exception, tweepy.errors.TweepyException):
+        # Retry on 5xx errors or connection issues
+        if (
+            isinstance(exception, tweepy.errors.HTTPException)
+            and exception.response.status_code >= 500
+        ):
+            return True
+        # Check for connection errors (often wrapped)
+        return "Connection" in str(exception) or "Timeout" in str(exception)
+    return False
 
 
 class XService:
@@ -55,6 +77,12 @@ class XService:
             await self.client.session.close()
             logging.debug("XService session closed.")
 
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=4, max=10),
+        retry=retry_if_exception(is_transient_error),
+        reraise=True,
+    )
     async def get_blocked_user_ids(self) -> set[int]:
         """
         Fetches the complete list of blocked user IDs using v1.1 API.
@@ -66,6 +94,9 @@ class XService:
         try:
             while cursor != 0:
                 async with self.v1_lock:
+                    # We wrap the sync call in a retry block via the outer decorator
+                    # But since it's a generator-like process, retrying the whole thing might be expensive.
+                    # Ideally we retry individual pages. But for now, simple retry is safer than complex logic.
                     ids, (_, next_cursor) = await asyncio.to_thread(
                         self.api_v1.get_blocked_ids, cursor=cursor
                     )
@@ -77,7 +108,9 @@ class XService:
                         extra={"single_line": True},
                     )
         except Exception as e:
-            logging.error(f"Error fetching blocked IDs: {e}", exc_info=True)
+            # If it's transient, the decorator handles it. If not, we log and re-raise.
+            if not is_transient_error(e):
+                logging.error(f"Error fetching blocked IDs: {e}", exc_info=True)
             raise
 
         logging.info(
@@ -86,13 +119,7 @@ class XService:
         return blocked_user_ids
 
     async def _check_user_exists_v1(self, user_id: int) -> bool | None:
-        """Checks if a user exists and is active using v1.1 API.
-
-        Returns:
-            True: User exists.
-            False: User does not exist (NotFound or Forbidden).
-            None: Unable to verify (Unexpected error).
-        """
+        """Checks if a user exists and is active using v1.1 API."""
         try:
             async with self.v1_lock:
                 await asyncio.to_thread(self.api_v1.get_user, user_id=user_id)
@@ -110,10 +137,7 @@ class XService:
 
     async def _handle_zombie_recovery(self, user_id: int) -> str:
         """
-        Attempts to fix a 'Zombie Block' (user exists but V1 unblock fails with 404).
-        Strategies:
-        1. V2 Unblock fallback.
-        2. Toggle Block fix (block then unblock).
+        Attempts to fix a 'Zombie Block'.
         """
         logging.warning(
             f"User ID {user_id} EXISTS. Attempting recovery strategies (Zombie Fix)..."
@@ -121,7 +145,6 @@ class XService:
 
         # Strategy 1: V2 Unblock
         try:
-            # client.unblock is missing in some Tweepy versions or AsyncClient
             await self.ensure_initialized()
             await self.client.request(
                 "DELETE",
@@ -156,6 +179,12 @@ class XService:
         )
         return "NOT_FOUND"
 
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=5),
+        retry=retry_if_exception(is_transient_error),
+        reraise=True,
+    )
     async def unblock_user(self, user_id: int) -> str:
         """
         Unblocks a user using v1.1 API with Zombie Block recovery.
@@ -166,6 +195,7 @@ class XService:
                 await asyncio.to_thread(self.api_v1.destroy_block, user_id=user_id)
             return "SUCCESS"
         except tweepy.errors.NotFound as e:
+            # Not found is not transient, so we handle it immediately
             logging.warning(
                 f"User ID {user_id} not found (404) on V1. API says: {e}. Checking if user exists..."
             )
@@ -183,6 +213,8 @@ class XService:
                 )
                 return "FAILED"
         except Exception as e:
+            if is_transient_error(e):
+                raise  # Reraise to let tenacity handle it
             logging.warning(f"Failed to unblock {user_id}: {e}")
             return "FAILED"
 
@@ -192,10 +224,15 @@ class XService:
             user_fields=["public_metrics", "created_at", "description"]
         )
 
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=4, max=10),
+        retry=retry_if_exception(is_transient_error),
+        reraise=True,
+    )
     async def get_following_user_ids(self) -> set[int]:
         """
         Fetches the complete list of user IDs that the authenticated user follows.
-        Uses v1.1 API.
         """
         logging.info("Fetching following account IDs via v1.1 API...")
         following_ids = set()
@@ -215,7 +252,8 @@ class XService:
                         extra={"single_line": True},
                     )
         except Exception as e:
-            logging.error(f"Error fetching following IDs: {e}", exc_info=True)
+            if not is_transient_error(e):
+                logging.error(f"Error fetching following IDs: {e}", exc_info=True)
             raise
 
         logging.info(
@@ -223,10 +261,15 @@ class XService:
         )
         return following_ids
 
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=4, max=10),
+        retry=retry_if_exception(is_transient_error),
+        reraise=True,
+    )
     async def get_follower_user_ids(self) -> set[int]:
         """
         Fetches the complete list of user IDs that follow the authenticated user.
-        Uses v1.1 API.
         """
         logging.info("Fetching follower account IDs via v1.1 API...")
         follower_ids = set()
@@ -246,7 +289,8 @@ class XService:
                         extra={"single_line": True},
                     )
         except Exception as e:
-            logging.error(f"Error fetching follower IDs: {e}", exc_info=True)
+            if not is_transient_error(e):
+                logging.error(f"Error fetching follower IDs: {e}", exc_info=True)
             raise
 
         logging.info(
@@ -254,6 +298,12 @@ class XService:
         )
         return follower_ids
 
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=5),
+        retry=retry_if_exception(is_transient_error),
+        reraise=True,
+    )
     async def unfollow_user(self, user_id: int) -> str:
         """
         Unfollows a user using v1.1 API.
@@ -264,5 +314,7 @@ class XService:
                 await asyncio.to_thread(self.api_v1.destroy_friendship, user_id=user_id)
             return "SUCCESS"
         except Exception as e:
+            if is_transient_error(e):
+                raise
             logging.warning(f"Failed to unfollow {user_id}: {e}")
             return "FAILED"

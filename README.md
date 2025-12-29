@@ -11,6 +11,8 @@ The framework is designed to be extensible, allowing for the easy addition of ne
 *   **Resumable:** Progress is saved in an SQLite database. You can stop and restart at any time without losing your place.
 *   **Rate Limit Handling:** Automatically handles X API rate limits with built-in wait-and-resume logic.
 *   **Robust:** Gracefully handles deleted, suspended, or missing accounts.
+*   **Resilient:** Includes automatic retries for transient network errors.
+*   **Safe:** Validates configuration on startup and offers a `--dry-run` mode to preview actions without executing them.
 *   **Modern CLI:** Built with `Typer` for an intuitive command-line experience.
 
 ## Requirements
@@ -65,7 +67,7 @@ Use the `x-agent` command followed by the agent you want to run.
     uv run x-agent unblock --user-id 123456789
     ```
 
-*   **Unfollow:** Manages your following list. By default, it targets accounts that do not follow you back.
+*   **Unfollow:** Detects who has unfollowed you since the last run. It does NOT unfollow anyone automatically; it is a monitoring tool.
     ```bash
     uv run x-agent unfollow
     ```
@@ -81,6 +83,11 @@ Use the `x-agent` command followed by the agent you want to run.
     ```
 
 ### Global Options
+
+Use `--dry-run` to simulate actions without applying them (available for `unblock` and `unfollow`):
+```bash
+uv run x-agent unblock --dry-run
+```
 
 Use `--debug` with any command for detailed logging:
 ```bash
