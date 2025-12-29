@@ -61,16 +61,22 @@ class DatabaseManager:
             logging.error(f"Failed to backup database: {e}")
             return None
 
-    def add_insight(self, followers: int, following: int, tweet_count: int = 0) -> None:
+    def add_insight(
+        self,
+        followers: int,
+        following: int,
+        tweet_count: int = 0,
+        listed_count: int = 0,
+    ) -> None:
         """Adds a new insight record to the database."""
         with self.transaction() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "INSERT INTO insights (followers, following, tweet_count) VALUES (?, ?, ?)",
-                (followers, following, tweet_count),
+                "INSERT INTO insights (followers, following, tweet_count, listed_count) VALUES (?, ?, ?, ?)",
+                (followers, following, tweet_count, listed_count),
             )
         logging.info(
-            f"Added new insight: {followers} followers, {following} following, {tweet_count} tweets."
+            f"Added new insight: {followers} followers, {following} following, {tweet_count} tweets, {listed_count} listed."
         )
 
     def get_latest_insight(self) -> Optional[sqlite3.Row]:
