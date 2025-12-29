@@ -116,3 +116,15 @@ def test_invalid_command():
     result = runner.invoke(app, ["invalid"])
     assert result.exit_code != 0
     assert "No such command" in result.output
+
+
+def test_cli_config_error(mock_x_service, mock_db_manager):
+    """Test that the CLI exits with an error if configuration is invalid."""
+    with patch("x_agent.cli.settings") as mock_settings:
+        mock_settings.check_config.side_effect = ValueError("Missing X_API_KEY")
+
+        # Any command should trigger the callback
+        result = runner.invoke(app, ["insights"])
+
+        assert result.exit_code == 1
+        assert "Configuration Error: Missing X_API_KEY" in result.output
