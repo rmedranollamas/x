@@ -2,7 +2,8 @@ import logging
 import asyncio
 import sqlite3
 import time
-from typing import Optional, TYPE_CHECKING
+from datetime import datetime, timezone
+from typing import Optional, TYPE_CHECKING, Union
 import tweepy
 from .base_agent import BaseAgent
 from ..services.x_service import XService
@@ -53,6 +54,8 @@ class InsightsAgent(BaseAgent):
         current_followers = metrics.get("followers_count", 0)
         current_following = metrics.get("following_count", 0)
         current_tweets = metrics.get("tweet_count", 0)
+        current_listed = metrics.get("listed_count", 0)
+        created_at = me_data.created_at
 
         # Get historical metrics from the database
         comparisons = {
@@ -64,7 +67,12 @@ class InsightsAgent(BaseAgent):
 
         # Generate the report
         self._generate_report(
-            current_followers, current_following, current_tweets, comparisons
+            current_followers,
+            current_following,
+            current_tweets,
+            current_listed,
+            created_at,
+            comparisons,
         )
 
         # Save the new metrics to the database
@@ -73,6 +81,7 @@ class InsightsAgent(BaseAgent):
             current_followers,
             current_following,
             current_tweets,
+            current_listed,
         )
 
         logging.info("Insights agent finished successfully.")
@@ -82,24 +91,50 @@ class InsightsAgent(BaseAgent):
         current_followers: int,
         current_following: int,
         current_tweets: int,
+        current_listed: int,
+        created_at: Optional[Union[datetime, time.struct_time]],
         comparisons: dict[str, Optional[sqlite3.Row]],
     ) -> None:
         """
         Generates and prints a comprehensive report.
         """
-        print("\n" + "=" * 45)
-        print("       🚀 X ACCOUNT MASTER INSIGHTS 🚀       ")
-        print("=" * 45)
+        print("\n" + "=" * 55)
+        print("         🚀 X ACCOUNT MASTER INSIGHTS 🚀         ")
+        print("=" * 55)
 
         # 1. Core Metrics & Ratios
         ratio = current_followers / current_following if current_following > 0 else 0
         print(f"Followers:  {current_followers:<8} | Following: {current_following}")
         print(f"Tweets:     {current_tweets:<8} | Ratio:     {ratio:.2f}")
-        print("-" * 45)
+        print(f"Listed In:  {current_listed:<8}")
+        print("-" * 55)
 
-        # 2. Historical Comparisons
-        print(f"{'Timeframe':12} | {'Followers':10} | {'Tweets':8}")
-        print("-" * 45)
+        # 2. Account Vitality (New Section)
+        if created_at:
+            # Tweepy created_at is often a datetime object in newer versions,
+            # but let's handle it safely.
+            if isinstance(created_at, datetime):
+                creation_dt = created_at
+            else:
+                # Fallback for struct_time if returned by some Tweepy versions
+                creation_dt = datetime.fromtimestamp(
+                    time.mktime(created_at), tz=timezone.utc
+                )
+
+            now = datetime.now(timezone.utc)
+            age_days = (now - creation_dt).days or 1
+            avg_tweets_per_day = current_tweets / age_days
+
+            print("                ACCOUNT VITALITY                 ")
+            print(f"Account Age:      {age_days:,} days")
+            print(
+                f"Tweet Frequency:  {avg_tweets_per_day:.2f} tweets/day (lifetime avg)"
+            )
+            print("-" * 55)
+
+        # 3. Historical Comparisons
+        print(f"{'Timeframe':12} | {'Followers':10} | {'Tweets':8} | {'Listed':6}")
+        print("-" * 55)
 
         has_history = False
         for label, insight in comparisons.items():
@@ -109,19 +144,24 @@ class InsightsAgent(BaseAgent):
 
             f_delta = current_followers - insight["followers"]
             t_delta = current_tweets - insight["tweet_count"]
+            l_delta = current_listed - insight["listed_count"]
 
             f_sign = "+" if f_delta >= 0 else "-"
             t_sign = "+" if t_delta >= 0 else "-"
+            l_sign = "+" if l_delta >= 0 else "-"
 
             f_delta_str = f"{f_sign}{abs(f_delta)}"
             t_delta_str = f"{t_sign}{abs(t_delta)}"
+            l_delta_str = f"{l_sign}{abs(l_delta)}"
 
-            print(f"{label:12} | {f_delta_str:>10} | {t_delta_str:>8}")
+            print(
+                f"{label:12} | {f_delta_str:>10} | {t_delta_str:>8} | {l_delta_str:>6}"
+            )
 
         if not has_history:
             print("No historical data yet. First run recorded!")
 
-        print("-" * 45)
+        print("-" * 55)
 
         # 3. Growth Velocity & Projections (if 24h data exists)
         day_insight = comparisons.get("24h Ago") or comparisons.get("Previous")
