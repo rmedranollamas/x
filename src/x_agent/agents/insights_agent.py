@@ -163,7 +163,7 @@ class InsightsAgent(BaseAgent):
 
         print("-" * 55)
 
-        # 3. Growth Velocity & Projections (if 24h data exists)
+        # 4. Growth Velocity & Projections (if 24h data exists)
         day_insight = comparisons.get("24h Ago") or comparisons.get("Previous")
         if day_insight:
             # Simple average-based projection
