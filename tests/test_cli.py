@@ -1,6 +1,6 @@
 import pytest
 from typer.testing import CliRunner
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, ANY
 from x_agent.cli import app
 
 runner = CliRunner()
@@ -9,6 +9,12 @@ runner = CliRunner()
 @pytest.fixture
 def mock_x_service():
     with patch("x_agent.cli.XService") as mock:
+        yield mock
+
+
+@pytest.fixture
+def mock_db_manager():
+    with patch("x_agent.cli.DatabaseManager") as mock:
         yield mock
 
 
@@ -22,7 +28,7 @@ def mock_agents():
         yield mock_unblock, mock_insights, mock_blocked_ids
 
 
-def test_unblock_command(mock_x_service, mock_agents):
+def test_unblock_command(mock_x_service, mock_db_manager, mock_agents):
     mock_unblock_cls, _, _ = mock_agents
     mock_unblock_instance = mock_unblock_cls.return_value
 
@@ -32,12 +38,16 @@ def test_unblock_command(mock_x_service, mock_agents):
 
             assert result.exit_code == 0
             mock_unblock_cls.assert_called_once_with(
-                mock_x_service.return_value, user_id=None, refresh=False
+                mock_x_service.return_value,
+                mock_db_manager.return_value,
+                dry_run=False,
+                user_id=None,
+                refresh=False,
             )
             mock_run.assert_called_once()
 
 
-def test_unblock_command_with_user_id(mock_x_service, mock_agents):
+def test_unblock_command_with_user_id(mock_x_service, mock_db_manager, mock_agents):
     mock_unblock_cls, _, _ = mock_agents
     mock_unblock_instance = mock_unblock_cls.return_value
 
@@ -47,12 +57,16 @@ def test_unblock_command_with_user_id(mock_x_service, mock_agents):
 
             assert result.exit_code == 0
             mock_unblock_cls.assert_called_once_with(
-                mock_x_service.return_value, user_id=12345, refresh=False
+                mock_x_service.return_value,
+                mock_db_manager.return_value,
+                dry_run=False,
+                user_id=12345,
+                refresh=False,
             )
             mock_run.assert_called_once()
 
 
-def test_insights_command(mock_x_service, mock_agents):
+def test_insights_command(mock_x_service, mock_db_manager, mock_agents):
     _, mock_insights_cls, _ = mock_agents
     mock_insights_instance = mock_insights_cls.return_value
 
@@ -61,11 +75,13 @@ def test_insights_command(mock_x_service, mock_agents):
             result = runner.invoke(app, ["insights", "--debug"])
 
             assert result.exit_code == 0
-            mock_insights_cls.assert_called_once()
+            mock_insights_cls.assert_called_once_with(
+                mock_x_service.return_value, mock_db_manager.return_value, dry_run=False
+            )
             mock_run.assert_called_once()
 
 
-def test_blocked_ids_command(mock_x_service, mock_agents):
+def test_blocked_ids_command(mock_x_service, mock_db_manager, mock_agents):
     _, _, mock_blocked_ids_cls = mock_agents
     mock_blocked_ids_instance = mock_blocked_ids_cls.return_value
 
@@ -74,11 +90,13 @@ def test_blocked_ids_command(mock_x_service, mock_agents):
             result = runner.invoke(app, ["blocked-ids"])
 
             assert result.exit_code == 0
-            mock_blocked_ids_cls.assert_called_once()
+            mock_blocked_ids_cls.assert_called_once_with(
+                mock_x_service.return_value, mock_db_manager.return_value, dry_run=False
+            )
             mock_run.assert_called_once()
 
 
-def test_unfollow_command(mock_x_service, mock_agents):
+def test_unfollow_command(mock_x_service, mock_db_manager, mock_agents):
     with patch("x_agent.cli.UnfollowAgent") as mock_unfollow_cls:
         mock_unfollow_instance = mock_unfollow_cls.return_value
         with patch.object(mock_unfollow_instance, "execute", new_callable=MagicMock):
@@ -86,7 +104,11 @@ def test_unfollow_command(mock_x_service, mock_agents):
                 result = runner.invoke(app, ["unfollow"])
 
                 assert result.exit_code == 0
-                mock_unfollow_cls.assert_called_once_with(mock_x_service.return_value)
+                mock_unfollow_cls.assert_called_once_with(
+                    mock_x_service.return_value,
+                    mock_db_manager.return_value,
+                    dry_run=False,
+                )
                 mock_run.assert_called_once()
 
 

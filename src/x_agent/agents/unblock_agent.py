@@ -1,9 +1,12 @@
 import logging
 import asyncio
 import time
+from typing import TYPE_CHECKING
 from .base_agent import BaseAgent
 from ..services.x_service import XService
-from .. import database
+
+if TYPE_CHECKING:
+    from ..database import DatabaseManager
 
 
 class UnblockAgent(BaseAgent):
@@ -12,17 +15,26 @@ class UnblockAgent(BaseAgent):
     """
 
     def __init__(
-        self, x_service: XService, user_id: int | None = None, refresh: bool = False
+        self,
+        x_service: XService,
+        db_manager: "DatabaseManager",
+        dry_run: bool = False,
+        user_id: int | None = None,
+        refresh: bool = False,
     ) -> None:
         """
-        Initializes the agent with a service to interact with the X API.
+        Initializes the agent.
 
         Args:
             x_service: An instance of XService.
+            db_manager: Database Manager instance.
+            dry_run: If True, simulate actions.
             user_id: Optional. A specific user ID to unblock.
             refresh: Optional. If True, re-fetches blocked IDs from API.
         """
+        super().__init__(db_manager)
         self.x_service = x_service
+        self.dry_run = dry_run
         self.user_id = user_id
         self.refresh = refresh
 
@@ -36,21 +48,29 @@ class UnblockAgent(BaseAgent):
         Fetches the list of blocked users, stores them in the DB, and unblocks them.
         """
         await self.x_service.ensure_initialized()
-        await asyncio.to_thread(database.initialize_database)
+        await asyncio.to_thread(self.db.initialize_database)
+
+        if self.dry_run:
+            logging.info("DRY RUN ENABLED: No changes will be made to X.")
 
         # Specific user_id override
         if self.user_id is not None:
             logging.info(f"Attempting to unblock specific user ID: {self.user_id}")
-            status = await self.x_service.unblock_user(self.user_id)
+            if self.dry_run:
+                status = "SUCCESS"
+                logging.info(f"[Dry Run] Would unblock {self.user_id}")
+            else:
+                status = await self.x_service.unblock_user(self.user_id)
+
             if status == "SUCCESS":
                 logging.info(f"Successfully unblocked {self.user_id}.")
                 await asyncio.to_thread(
-                    database.update_user_status, self.user_id, "UNBLOCKED"
+                    self.db.update_user_status, self.user_id, "UNBLOCKED"
                 )
             else:
                 logging.error(f"Failed to unblock {self.user_id}: {status}")
                 await asyncio.to_thread(
-                    database.update_user_status, self.user_id, "FAILED"
+                    self.db.update_user_status, self.user_id, "FAILED"
                 )
             return
 
@@ -58,7 +78,7 @@ class UnblockAgent(BaseAgent):
 
         # --- State Loading and Resumption Logic ---
         total_blocked_count = await asyncio.to_thread(
-            database.get_all_blocked_users_count
+            self.db.get_all_blocked_users_count
         )
 
         if total_blocked_count == 0 or self.refresh:
@@ -66,7 +86,7 @@ class UnblockAgent(BaseAgent):
                 logging.info(
                     "Refresh requested. Fetching latest blocked IDs from API..."
                 )
-                await asyncio.to_thread(database.clear_pending_blocked_users)
+                await asyncio.to_thread(self.db.clear_pending_blocked_users)
             else:
                 logging.info(
                     "No local cache of blocked IDs found. Fetching from the API..."
@@ -74,9 +94,9 @@ class UnblockAgent(BaseAgent):
 
             all_blocked_ids = await self.x_service.get_blocked_user_ids()
             if all_blocked_ids:
-                await asyncio.to_thread(database.add_blocked_users, all_blocked_ids)
+                await asyncio.to_thread(self.db.add_blocked_users, all_blocked_ids)
                 total_blocked_count = await asyncio.to_thread(
-                    database.get_all_blocked_users_count
+                    self.db.get_all_blocked_users_count
                 )
                 logging.info(f"Saved {len(all_blocked_ids)} blocked IDs to database.")
             else:
@@ -84,8 +104,8 @@ class UnblockAgent(BaseAgent):
                     logging.info("No blocked IDs found from the API.")
                     return
 
-        pending_ids = await asyncio.to_thread(database.get_pending_blocked_users)
-        processed_count = await asyncio.to_thread(database.get_processed_users_count)
+        pending_ids = await asyncio.to_thread(self.db.get_pending_blocked_users)
+        processed_count = await asyncio.to_thread(self.db.get_processed_users_count)
 
         logging.info(
             f"Already processed: {processed_count}. Remaining to unblock: {len(pending_ids)}."
@@ -119,6 +139,13 @@ class UnblockAgent(BaseAgent):
         session_stats = {"SUCCESS": 0, "NOT_FOUND": 0, "FAILED": 0}
 
         async def unblock_worker(user_id: int) -> tuple[int, str]:
+            if self.dry_run:
+                # Simulate work
+                logging.info(
+                    f"[Dry Run] Would unblock {user_id}", extra={"single_line": True}
+                )
+                return user_id, "SUCCESS"
+
             async with sem:
                 status = await self.x_service.unblock_user(user_id)
                 logging.info(
@@ -142,7 +169,7 @@ class UnblockAgent(BaseAgent):
             for status, uids in chunk_status_map.items():
                 if uids:
                     await asyncio.to_thread(
-                        database.update_user_statuses,
+                        self.db.update_user_statuses,
                         uids,
                         status if status != "SUCCESS" else "UNBLOCKED",
                     )

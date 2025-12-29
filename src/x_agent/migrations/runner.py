@@ -2,17 +2,19 @@ import logging
 import importlib
 import pkgutil
 from pathlib import Path
-from typing import List, Type
+from typing import List, Type, TYPE_CHECKING
 from x_agent.migrations.base import Migration
 from x_agent.migrations import versions
 
+if TYPE_CHECKING:
+    from x_agent.database import DatabaseManager
 
-def _ensure_migrations_table():
+
+def _ensure_migrations_table(db_manager: "DatabaseManager"):
     """Ensures the schema_versions table exists."""
-    from x_agent.database import db_transaction
-
-    with db_transaction() as conn:
+    with db_manager.transaction() as conn:
         cursor = conn.cursor()
+
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS schema_versions (
                 version INTEGER PRIMARY KEY,
@@ -22,12 +24,11 @@ def _ensure_migrations_table():
         """)
 
 
-def _get_applied_versions() -> List[int]:
+def _get_applied_versions(db_manager: "DatabaseManager") -> List[int]:
     """Returns a list of already applied migration versions."""
-    from x_agent.database import db_transaction
-
-    with db_transaction() as conn:
+    with db_manager.transaction() as conn:
         cursor = conn.cursor()
+
         cursor.execute("SELECT version FROM schema_versions ORDER BY version ASC")
         return [row["version"] for row in cursor.fetchall()]
 
@@ -55,19 +56,13 @@ def _get_migration_classes() -> List[Type[Migration]]:
     return sorted(migrations, key=lambda m: m.version)
 
 
-def run_migrations():
+def run_migrations(db_manager: "DatabaseManager"):
     """
-
-
     Executes all pending migrations.
-
-
     """
+    _ensure_migrations_table(db_manager)
 
-    _ensure_migrations_table()
-
-    applied_versions = _get_applied_versions()
-
+    applied_versions = _get_applied_versions(db_manager)
     available_migrations = _get_migration_classes()
 
     pending_migrations = [
@@ -76,16 +71,13 @@ def run_migrations():
 
     if not pending_migrations:
         logging.info("Schema is up to date.")
-
         return
 
     logging.info(f"Found {len(pending_migrations)} pending migrations.")
 
-    from x_agent.database import backup_database, db_transaction
+    db_manager.backup_database()
 
-    backup_database()
-
-    with db_transaction() as conn:
+    with db_manager.transaction() as conn:
         cursor = conn.cursor()
 
         for migration_class in pending_migrations:
