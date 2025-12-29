@@ -122,7 +122,7 @@ class InsightsAgent(BaseAgent):
                 )
 
             now = datetime.now(timezone.utc)
-            age_days = (now - creation_dt).days or 1
+            age_days = max((now - creation_dt).days, 1)
             avg_tweets_per_day = current_tweets / age_days
 
             print("                ACCOUNT VITALITY                 ")
