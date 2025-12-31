@@ -1,4 +1,6 @@
 import logging
+import html
+import textwrap
 import aiosmtplib
 from email.message import EmailMessage
 from ..config import settings
