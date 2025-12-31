@@ -14,6 +14,18 @@ class Settings(BaseSettings):
 
     environment: str = Field("development", validation_alias="X_AGENT_ENV")
 
+    @property
+    def normalized_environment(self) -> str:
+        return self.environment.lower().strip()
+
+    @property
+    def is_dev(self) -> bool:
+        return self.normalized_environment == "development"
+
+    @property
+    def db_name(self) -> str:
+        return "insights_dev.db" if self.is_dev else "insights.db"
+
     # SMTP Settings
     smtp_host: str = Field("smtp.gmail.com", validation_alias="SMTP_HOST")
     smtp_port: int = Field(587, validation_alias="SMTP_PORT")
@@ -23,14 +35,6 @@ class Settings(BaseSettings):
     report_recipient: str | None = Field(None, validation_alias="REPORT_RECIPIENT")
     smtp_use_tls: bool = Field(False, validation_alias="SMTP_USE_TLS")
     smtp_start_tls: bool = Field(True, validation_alias="SMTP_START_TLS")
-
-    @property
-    def is_dev(self) -> bool:
-        return self.environment.lower() == "development"
-
-    @property
-    def db_name(self) -> str:
-        return "insights_dev.db" if self.is_dev else "insights.db"
 
     def check_config(self) -> None:
         """Validates that all required configuration variables are set."""

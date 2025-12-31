@@ -30,6 +30,15 @@ def main_callback():
     """
     try:
         settings.check_config()
+        # Display environment info at startup
+        db_manager = DatabaseManager()
+        env_str = typer.style(
+            settings.environment.upper(),
+            fg=typer.colors.GREEN if settings.is_dev else typer.colors.YELLOW,
+            bold=True,
+        )
+        db_str = typer.style(str(db_manager.db_path.name), fg=typer.colors.CYAN)
+        typer.echo(f"Environment: {env_str} | Database: {db_str}")
     except ValueError as e:
         typer.echo(f"Configuration Error: {e}", err=True)
         raise typer.Exit(code=1)
