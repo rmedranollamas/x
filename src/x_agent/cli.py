@@ -117,10 +117,24 @@ def insights(
     """
     Run the insights agent to gather and report account metrics.
     """
-    report = _run_agent(InsightsAgent, debug)
+    setup_logging(debug)
+    x_service = XService()
+    db_manager = DatabaseManager()
+    agent = InsightsAgent(x_service, db_manager)
 
-    if email and report:
-        asyncio.run(send_report_email(report))
+    async def _run():
+        try:
+            report = await agent.execute()
+            if email and report:
+                await send_report_email(report)
+        finally:
+            await x_service.close()
+
+    try:
+        asyncio.run(_run())
+    except Exception as e:
+        logging.error(f"An unexpected error occurred: {e}", exc_info=True)
+        sys.exit(1)
 
 
 @app.command()
