@@ -19,7 +19,7 @@ async def send_report_email(report_text: str):
         return
 
     message = EmailMessage()
-    message["From"] = settings.smtp_user
+    message["From"] = settings.report_sender
     message["To"] = settings.report_recipient
     message["Subject"] = f"X Account Insights Report - {settings.environment.upper()}"
 

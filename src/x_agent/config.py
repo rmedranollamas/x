@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     smtp_port: int = Field(587, validation_alias="SMTP_PORT")
     smtp_user: str | None = Field(None, validation_alias="SMTP_USER")
     smtp_password: str | None = Field(None, validation_alias="SMTP_PASSWORD")
+    report_sender: str | None = Field(None, validation_alias="REPORT_SENDER")
     report_recipient: str | None = Field(None, validation_alias="REPORT_RECIPIENT")
     smtp_use_tls: bool = Field(False, validation_alias="SMTP_USE_TLS")
     smtp_start_tls: bool = Field(True, validation_alias="SMTP_START_TLS")
@@ -56,6 +57,8 @@ class Settings(BaseSettings):
             missing.append("SMTP_USER")
         if not self.smtp_password:
             missing.append("SMTP_PASSWORD")
+        if not self.report_sender:
+            missing.append("REPORT_SENDER")
         if not self.report_recipient:
             missing.append("REPORT_RECIPIENT")
 

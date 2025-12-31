@@ -18,6 +18,7 @@ async def test_send_report_email_success(mock_smtp_send):
         mock_settings.smtp_port = 587
         mock_settings.smtp_user = "user@test.com"
         mock_settings.smtp_password = "password"
+        mock_settings.report_sender = "sender@test.com"
         mock_settings.report_recipient = "target@test.com"
         mock_settings.environment = "test"
         mock_settings.smtp_use_tls = False
@@ -34,6 +35,7 @@ async def test_send_report_email_success(mock_smtp_send):
 
         # Verify message content
         message = mock_smtp_send.call_args[0][0]
+        assert message["From"] == "sender@test.com"
         assert message["To"] == "target@test.com"
 
         # For multipart, we check the plain text part
@@ -48,6 +50,7 @@ async def test_send_report_email_smtp_error(mock_smtp_send, caplog):
     with patch("x_agent.utils.email_utils.settings") as mock_settings:
         mock_settings.smtp_user = "user@test.com"
         mock_settings.smtp_password = "password"
+        mock_settings.report_sender = "sender@test.com"
         mock_settings.report_recipient = "target@test.com"
         mock_settings.check_email_config.return_value = None
 
@@ -58,6 +61,10 @@ async def test_send_report_email_smtp_error(mock_smtp_send, caplog):
 @pytest.mark.asyncio
 async def test_send_report_email_missing_config(mock_smtp_send, caplog):
     with patch("x_agent.utils.email_utils.settings") as mock_settings:
+        mock_settings.smtp_user = "user@test.com"
+        mock_settings.smtp_password = "password"
+        mock_settings.report_sender = "sender@test.com"
+        mock_settings.report_recipient = "target@test.com"
         mock_settings.check_email_config.side_effect = ValueError("Missing config")
 
         await send_report_email("Test content")
