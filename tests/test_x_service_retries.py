@@ -36,7 +36,7 @@ async def test_x_service_retry_logic():
     # OR we can just mock the underlying api_v1 call to fail then succeed.
 
     with (
-        patch("x_agent.services.x_service.settings") as mock_settings,
+        patch("x_agent.services.x_service.settings"),
         patch("x_agent.services.x_service.tweepy.asynchronous.AsyncClient"),
         patch("x_agent.services.x_service.tweepy.OAuth1UserHandler"),
         patch("x_agent.services.x_service.tweepy.API") as mock_api_cls,

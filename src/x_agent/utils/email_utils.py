@@ -10,14 +10,7 @@ async def send_report_email(report_text: str):
     """
     Sends the generated insights report via email.
     """
-    logging.info("Preparing to send report email...")
-    logging.debug(f"Sender: {settings.report_sender}")
-    logging.debug(f"Recipient: {settings.report_recipient}")
-    logging.debug(f"SMTP User: {settings.smtp_user}")
-    if settings.smtp_password:
-        logging.debug(f"SMTP Password set: Yes (length: {len(settings.smtp_password)})")
-    else:
-        logging.debug("SMTP Password set: No")
+    logging.info(f"Preparing to send report email to {settings.report_recipient}...")
 
     try:
         settings.check_email_config()
