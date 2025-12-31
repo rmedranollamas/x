@@ -38,20 +38,21 @@ async def test_execute_first_run(
         "followers_count": 100,
         "following_count": 50,
         "tweet_count": 10,
+        "listed_count": 5,
     }
+    mock_me.created_at = None
     mock_x_service.get_me.return_value = MagicMock(data=mock_me)
 
     # No previous insight in DB
     mock_db_manager.get_latest_insight.return_value = None
 
-    await insights_agent.execute()
+    report = await insights_agent.execute()
 
     mock_db_manager.initialize_database.assert_called_once()
-    mock_db_manager.add_insight.assert_called_once_with(100, 50, 10)
+    mock_db_manager.add_insight.assert_called_once_with(100, 50, 10, 5)
 
-    captured = capsys.readouterr()
-    assert "Followers:  100" in captured.out
-    assert "Following: 50" in captured.out
+    assert "Followers:  100" in report
+    assert "Following: 50" in report
 
 
 @pytest.mark.asyncio
@@ -65,7 +66,9 @@ async def test_execute_with_previous_data(
         "followers_count": 110,
         "following_count": 45,
         "tweet_count": 15,
+        "listed_count": 7,
     }
+    mock_me.created_at = None
     mock_x_service.get_me.return_value = MagicMock(data=mock_me)
 
     # Previous metrics in DB
@@ -73,13 +76,12 @@ async def test_execute_with_previous_data(
         "followers": 100,
         "following": 50,
         "tweet_count": 5,
+        "listed_count": 2,
     }
 
-    await insights_agent.execute()
+    report = await insights_agent.execute()
 
-    mock_db_manager.add_insight.assert_called_once_with(110, 45, 15)
+    mock_db_manager.add_insight.assert_called_once_with(110, 45, 15, 7)
 
-    captured = capsys.readouterr()
-    assert "Followers:  110" in captured.out
-    assert "+10" in captured.out
-    assert "+10" in captured.out  # Tweet delta 15-5
+    assert "Followers:  110" in report
+    assert "+10" in report

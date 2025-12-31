@@ -8,6 +8,7 @@ from .agents.unblock_agent import UnblockAgent
 from .agents.insights_agent import InsightsAgent
 from .agents.blocked_ids_agent import BlockedIdsAgent
 from .agents.unfollow_agent import UnfollowAgent
+from .utils.email_utils import send_report_email
 from .logging_setup import setup_logging
 from .config import settings
 from .database import DatabaseManager
@@ -72,12 +73,12 @@ def _run_agent(agent_class, debug: bool, dry_run: bool = False, **kwargs):
 
     async def _async_run():
         try:
-            await agent.execute()
+            return await agent.execute()
         finally:
             await x_service.close()
 
     try:
-        asyncio.run(_async_run())
+        return asyncio.run(_async_run())
     except Exception as e:
         logging.error(f"An unexpected error occurred: {e}", exc_info=True)
         sys.exit(1)
@@ -109,12 +110,31 @@ def insights(
     debug: bool = typer.Option(
         False, "--debug", help="Enable debug logging for detailed output."
     ),
+    email: bool = typer.Option(
+        False, "--email", help="Send the report via email after generation."
+    ),
 ):
     """
     Run the insights agent to gather and report account metrics.
     """
-    # Insights is read-only, so dry_run is implicitly irrelevant but we can support it if needed.
-    _run_agent(InsightsAgent, debug)
+    setup_logging(debug)
+    x_service = XService()
+    db_manager = DatabaseManager()
+    agent = InsightsAgent(x_service, db_manager)
+
+    async def _run():
+        try:
+            report = await agent.execute()
+            if email and report:
+                await send_report_email(report)
+        finally:
+            await x_service.close()
+
+    try:
+        asyncio.run(_run())
+    except Exception as e:
+        logging.error(f"An unexpected error occurred: {e}", exc_info=True)
+        sys.exit(1)
 
 
 @app.command()

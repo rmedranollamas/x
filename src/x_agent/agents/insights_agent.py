@@ -30,7 +30,7 @@ class InsightsAgent(BaseAgent):
         super().__init__(db_manager)
         self.x_service = x_service
 
-    async def execute(self) -> None:
+    async def execute(self) -> str | None:
         """Runs the insights agent to generate and store the report."""
         logging.info("Starting the insights agent...")
 
@@ -44,11 +44,11 @@ class InsightsAgent(BaseAgent):
             me_data = response.data
         except tweepy.errors.TweepyException as e:
             logging.error(f"Could not retrieve user metrics: {e}")
-            return
+            return None
 
         if not me_data or not me_data.public_metrics:
             logging.error("Could not retrieve user metrics. Aborting.")
-            return
+            return None
 
         metrics = me_data.public_metrics
         current_followers = metrics.get("followers_count", 0)
@@ -66,7 +66,7 @@ class InsightsAgent(BaseAgent):
         }
 
         # Generate the report
-        self._generate_report(
+        report = self._generate_report(
             current_followers,
             current_following,
             current_tweets,
@@ -74,6 +74,9 @@ class InsightsAgent(BaseAgent):
             created_at,
             comparisons,
         )
+
+        # Print to stdout as before
+        print(report)
 
         # Save the new metrics to the database
         await asyncio.to_thread(
@@ -85,6 +88,7 @@ class InsightsAgent(BaseAgent):
         )
 
         logging.info("Insights agent finished successfully.")
+        return report
 
     def _generate_report(
         self,
@@ -94,20 +98,23 @@ class InsightsAgent(BaseAgent):
         current_listed: int,
         created_at: Optional[Union[datetime, time.struct_time]],
         comparisons: dict[str, Optional[sqlite3.Row]],
-    ) -> None:
+    ) -> str:
         """
-        Generates and prints a comprehensive report.
+        Generates a comprehensive report and returns it as a string.
         """
-        print("\n" + "=" * 55)
-        print("         🚀 X ACCOUNT MASTER INSIGHTS 🚀         ")
-        print("=" * 55)
+        lines = []
+        lines.append("\n" + "=" * 55)
+        lines.append("         🚀 X ACCOUNT MASTER INSIGHTS 🚀         ")
+        lines.append("=" * 55)
 
         # 1. Core Metrics & Ratios
         ratio = current_followers / current_following if current_following > 0 else 0
-        print(f"Followers:  {current_followers:<8} | Following: {current_following}")
-        print(f"Tweets:     {current_tweets:<8} | Ratio:     {ratio:.2f}")
-        print(f"Listed In:  {current_listed:<8}")
-        print("-" * 55)
+        lines.append(
+            f"Followers:  {current_followers:<8} | Following: {current_following}"
+        )
+        lines.append(f"Tweets:     {current_tweets:<8} | Ratio:     {ratio:.2f}")
+        lines.append(f"Listed In:  {current_listed:<8}")
+        lines.append("-" * 55)
 
         # 2. Account Vitality (New Section)
         if created_at:
@@ -125,16 +132,18 @@ class InsightsAgent(BaseAgent):
             age_days = max((now - creation_dt).days, 1)
             avg_tweets_per_day = current_tweets / age_days
 
-            print("                ACCOUNT VITALITY                 ")
-            print(f"Account Age:      {age_days:,} days")
-            print(
+            lines.append("                ACCOUNT VITALITY                 ")
+            lines.append(f"Account Age:      {age_days:,} days")
+            lines.append(
                 f"Tweet Frequency:  {avg_tweets_per_day:.2f} tweets/day (lifetime avg)"
             )
-            print("-" * 55)
+            lines.append("-" * 55)
 
         # 3. Historical Comparisons
-        print(f"{'Timeframe':12} | {'Followers':10} | {'Tweets':8} | {'Listed':6}")
-        print("-" * 55)
+        lines.append(
+            f"{'Timeframe':12} | {'Followers':10} | {'Tweets':8} | {'Listed':6}"
+        )
+        lines.append("-" * 55)
 
         has_history = False
         for label, insight in comparisons.items():
@@ -154,14 +163,14 @@ class InsightsAgent(BaseAgent):
             t_delta_str = f"{t_sign}{abs(t_delta)}"
             l_delta_str = f"{l_sign}{abs(l_delta)}"
 
-            print(
+            lines.append(
                 f"{label:12} | {f_delta_str:>10} | {t_delta_str:>8} | {l_delta_str:>6}"
             )
 
         if not has_history:
-            print("No historical data yet. First run recorded!")
+            lines.append("No historical data yet. First run recorded!")
 
-        print("-" * 55)
+        lines.append("-" * 55)
 
         # 4. Growth Velocity & Projections (if 24h data exists)
         day_insight = comparisons.get("24h Ago") or comparisons.get("Previous")
@@ -180,17 +189,20 @@ class InsightsAgent(BaseAgent):
             daily_velocity = (current_followers - day_insight["followers"]) / delta_days
 
             if daily_velocity > 0:
-                print(f"Growth Velocity: {daily_velocity:.1f} followers/day")
+                lines.append(f"Growth Velocity: {daily_velocity:.1f} followers/day")
 
                 # Projections to next milestones
                 for milestone in [100, 500, 1000, 5000, 10000]:
                     if current_followers < milestone:
                         days_to_go = (milestone - current_followers) / daily_velocity
-                        print(f"Next Milestone:  {milestone} in {int(days_to_go)} days")
+                        lines.append(
+                            f"Next Milestone:  {milestone} in {int(days_to_go)} days"
+                        )
                         break
             elif daily_velocity < 0:
-                print(
+                lines.append(
                     f"Growth Velocity: {daily_velocity:.1f} followers/day (Losing altitude!)"
                 )
 
-        print("=" * 45 + "\n")
+        lines.append("=" * 45 + "\n")
+        return "\n".join(lines)

@@ -14,6 +14,16 @@ class Settings(BaseSettings):
 
     environment: str = Field("development", validation_alias="X_AGENT_ENV")
 
+    # SMTP Settings
+    smtp_host: str = Field("smtp.gmail.com", validation_alias="SMTP_HOST")
+    smtp_port: int = Field(587, validation_alias="SMTP_PORT")
+    smtp_user: str | None = Field(None, validation_alias="SMTP_USER")
+    smtp_password: str | None = Field(None, validation_alias="SMTP_PASSWORD")
+    report_sender: str | None = Field(None, validation_alias="REPORT_SENDER")
+    report_recipient: str | None = Field(None, validation_alias="REPORT_RECIPIENT")
+    smtp_use_tls: bool = Field(False, validation_alias="SMTP_USE_TLS")
+    smtp_start_tls: bool = Field(True, validation_alias="SMTP_START_TLS")
+
     @property
     def is_dev(self) -> bool:
         return self.environment.lower() == "development"
@@ -38,6 +48,24 @@ class Settings(BaseSettings):
             raise ValueError(
                 f"Missing required environment variables: {', '.join(missing)}. "
                 "Please check your .env file."
+            )
+
+    def check_email_config(self) -> None:
+        """Validates that all required SMTP variables are set for email reporting."""
+        missing = []
+        if not self.smtp_user:
+            missing.append("SMTP_USER")
+        if not self.smtp_password:
+            missing.append("SMTP_PASSWORD")
+        if not self.report_sender:
+            missing.append("REPORT_SENDER")
+        if not self.report_recipient:
+            missing.append("REPORT_RECIPIENT")
+
+        if missing:
+            raise ValueError(
+                f"Email reporting requires: {', '.join(missing)}. "
+                "Please add them to your .env file."
             )
 
 
