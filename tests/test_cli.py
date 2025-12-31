@@ -1,6 +1,6 @@
 import pytest
 from typer.testing import CliRunner
-from unittest.mock import patch, MagicMock, ANY
+from unittest.mock import patch, AsyncMock
 from x_agent.cli import app
 
 runner = CliRunner()
@@ -32,7 +32,7 @@ def test_unblock_command(mock_x_service, mock_db_manager, mock_agents):
     mock_unblock_cls, _, _ = mock_agents
     mock_unblock_instance = mock_unblock_cls.return_value
 
-    with patch.object(mock_unblock_instance, "execute", new_callable=MagicMock):
+    with patch.object(mock_unblock_instance, "execute", new_callable=AsyncMock):
         with patch("x_agent.cli.asyncio.run") as mock_run:
             result = runner.invoke(app, ["unblock"])
 
@@ -51,7 +51,7 @@ def test_unblock_command_with_user_id(mock_x_service, mock_db_manager, mock_agen
     mock_unblock_cls, _, _ = mock_agents
     mock_unblock_instance = mock_unblock_cls.return_value
 
-    with patch.object(mock_unblock_instance, "execute", new_callable=MagicMock):
+    with patch.object(mock_unblock_instance, "execute", new_callable=AsyncMock):
         with patch("x_agent.cli.asyncio.run") as mock_run:
             result = runner.invoke(app, ["unblock", "--user-id", "12345"])
 
@@ -70,13 +70,17 @@ def test_insights_command(mock_x_service, mock_db_manager, mock_agents):
     _, mock_insights_cls, _ = mock_agents
     mock_insights_instance = mock_insights_cls.return_value
 
-    with patch.object(mock_insights_instance, "execute", new_callable=MagicMock):
+    with patch.object(
+        mock_insights_instance,
+        "execute",
+        new_callable=pytest.importorskip("unittest.mock").AsyncMock,
+    ):
         with patch("x_agent.cli.asyncio.run") as mock_run:
             result = runner.invoke(app, ["insights", "--debug"])
 
             assert result.exit_code == 0
             mock_insights_cls.assert_called_once_with(
-                mock_x_service.return_value, mock_db_manager.return_value, dry_run=False
+                mock_x_service.return_value, mock_db_manager.return_value
             )
             mock_run.assert_called_once()
 
@@ -85,7 +89,7 @@ def test_blocked_ids_command(mock_x_service, mock_db_manager, mock_agents):
     _, _, mock_blocked_ids_cls = mock_agents
     mock_blocked_ids_instance = mock_blocked_ids_cls.return_value
 
-    with patch.object(mock_blocked_ids_instance, "execute", new_callable=MagicMock):
+    with patch.object(mock_blocked_ids_instance, "execute", new_callable=AsyncMock):
         with patch("x_agent.cli.asyncio.run") as mock_run:
             result = runner.invoke(app, ["blocked-ids"])
 
@@ -99,7 +103,7 @@ def test_blocked_ids_command(mock_x_service, mock_db_manager, mock_agents):
 def test_unfollow_command(mock_x_service, mock_db_manager, mock_agents):
     with patch("x_agent.cli.UnfollowAgent") as mock_unfollow_cls:
         mock_unfollow_instance = mock_unfollow_cls.return_value
-        with patch.object(mock_unfollow_instance, "execute", new_callable=MagicMock):
+        with patch.object(mock_unfollow_instance, "execute", new_callable=AsyncMock):
             with patch("x_agent.cli.asyncio.run") as mock_run:
                 result = runner.invoke(app, ["unfollow"])
 

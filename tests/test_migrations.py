@@ -21,10 +21,11 @@ def test_run_migrations_creates_tables(db_manager, test_db_path):
     conn = sqlite3.connect(test_db_path)
     cursor = conn.cursor()
 
-    # Verify schema_versions exists and migration 1 is applied
+    # Verify schema_versions exists and all migrations are applied
     cursor.execute("SELECT version FROM schema_versions")
     versions = [row[0] for row in cursor.fetchall()]
     assert 1 in versions
+    assert 2 in versions
 
     # Verify business tables exist
     cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
@@ -40,8 +41,9 @@ def test_run_migrations_is_idempotent(db_manager, test_db_path):
     run_migrations(db_manager)
 
     applied = _get_applied_versions(db_manager)
-    assert len(applied) == 1
-    assert applied[0] == 1
+    assert len(applied) >= 2
+    assert 1 in applied
+    assert 2 in applied
 
 
 def test_migration_backup_triggered(db_manager, test_db_path, tmp_path):
