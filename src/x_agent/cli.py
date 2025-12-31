@@ -72,12 +72,12 @@ def _run_agent(agent_class, debug: bool, dry_run: bool = False, **kwargs):
 
     async def _async_run():
         try:
-            await agent.execute()
+            return await agent.execute()
         finally:
             await x_service.close()
 
     try:
-        asyncio.run(_async_run())
+        return asyncio.run(_async_run())
     except Exception as e:
         logging.error(f"An unexpected error occurred: {e}", exc_info=True)
         sys.exit(1)
@@ -109,12 +109,19 @@ def insights(
     debug: bool = typer.Option(
         False, "--debug", help="Enable debug logging for detailed output."
     ),
+    email: bool = typer.Option(
+        False, "--email", help="Send the report via email after generation."
+    ),
 ):
     """
     Run the insights agent to gather and report account metrics.
     """
-    # Insights is read-only, so dry_run is implicitly irrelevant but we can support it if needed.
-    _run_agent(InsightsAgent, debug)
+    report = _run_agent(InsightsAgent, debug)
+
+    if email and report:
+        from .utils.email_utils import send_report_email
+
+        asyncio.run(send_report_email(report))
 
 
 @app.command()
