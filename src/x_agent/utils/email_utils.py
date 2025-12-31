@@ -44,9 +44,11 @@ async def send_report_email(report_text: str):
             port=settings.smtp_port,
             username=settings.smtp_user,
             password=settings.smtp_password,
-            use_tls=(settings.smtp_port == 465),
-            start_tls=(settings.smtp_port == 587),
+            use_tls=settings.smtp_use_tls,
+            start_tls=settings.smtp_start_tls,
         )
         logging.info("Report email sent successfully!")
+    except aiosmtplib.SMTPException as e:
+        logging.error(f"SMTP error occurred: {e}")
     except Exception as e:
-        logging.error(f"Failed to send email: {e}", exc_info=True)
+        logging.error(f"Unexpected error sending email: {e}", exc_info=True)

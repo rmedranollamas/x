@@ -8,6 +8,7 @@ from .agents.unblock_agent import UnblockAgent
 from .agents.insights_agent import InsightsAgent
 from .agents.blocked_ids_agent import BlockedIdsAgent
 from .agents.unfollow_agent import UnfollowAgent
+from .utils.email_utils import send_report_email
 from .logging_setup import setup_logging
 from .config import settings
 from .database import DatabaseManager
@@ -119,8 +120,6 @@ def insights(
     report = _run_agent(InsightsAgent, debug)
 
     if email and report:
-        from .utils.email_utils import send_report_email
-
         asyncio.run(send_report_email(report))
 
 

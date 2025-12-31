@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     smtp_user: str | None = Field(None, validation_alias="SMTP_USER")
     smtp_password: str | None = Field(None, validation_alias="SMTP_PASSWORD")
     report_recipient: str | None = Field(None, validation_alias="REPORT_RECIPIENT")
+    smtp_use_tls: bool = Field(False, validation_alias="SMTP_USE_TLS")
+    smtp_start_tls: bool = Field(True, validation_alias="SMTP_START_TLS")
 
     @property
     def is_dev(self) -> bool:
