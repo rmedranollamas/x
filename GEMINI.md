@@ -8,15 +8,17 @@ Python CLI framework for X (Twitter) account management via modular agents.
 - **BaseAgent:** Abstract base class for all agents.
 - **Agents:**
     - `unblock`: Mass unblocks accounts with ghost/zombie protection.
-    - `insights`: Tracks daily follower/following metrics.
+    - `insights`: Tracks metrics and generates reports. Supports `--email` for automated delivery.
     - `blocked-ids`: Lists all currently blocked IDs.
     - `unfollow`: Mass unfollows accounts (e.g., non-followers).
-- **Persistence:** SQLite database (`.state/insights.db`) stores metrics and task statuses.
-- **CLI:** `Typer`-based entry point (`x-agent`).
+- **Persistence:** Environment-aware SQLite database (`.state/insights.db` for production, `insights_dev.db` for development).
+- **CLI:** `Typer`-based entry point (`x-agent`) with environment/DB visibility headers.
+- **Automation:** `scripts/setup_cron.py` helper for installing daily cronjobs.
 
 ## Key Technologies
 - Python 3.13+
 - `tweepy` & `tweepy.asynchronous`
+- `aiosmtplib` (Async email reporting)
 - `typer` (CLI)
 - `pydantic-settings` (Configuration)
 - `sqlite3` (Persistence)
@@ -24,13 +26,14 @@ Python CLI framework for X (Twitter) account management via modular agents.
 
 ## Development Conventions
 - Asynchronous first: all agents and services use `asyncio`.
-- Safe DB handling: use `db_transaction` context manager.
-- Fail-fast config: missing credentials stop the app at startup.
-- Robust error handling: specific Tweepy exceptions caught.
-- Informative CLI output with real-time updates.
-- Code style: `ruff` formatted, type-hinted.
+- Safe DB handling: use `transaction` context manager in `DatabaseManager`.
+- Fail-fast config: missing credentials or SMTP settings (when using `--email`) stop the app.
+- Environment-aware: `X_AGENT_ENV` toggles between dev and production databases.
+- Informative CLI output: Shows active environment and DB file on every run.
+- Code style: `ruff` formatted, type-hinted, verified with `ty`.
 
 ## Running the Tool
 1. `uv sync`
-2. `cp .env.example .env`
-3. `uv run x-agent [AGENT]`
+2. `cp .env.example .env` (Add SMTP settings for email reporting)
+3. `uv run x-agent [AGENT] [--email] [--debug]`
+4. `python3 scripts/setup_cron.py` to automate.

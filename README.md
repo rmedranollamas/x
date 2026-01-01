@@ -8,12 +8,14 @@ The framework is designed to be extensible, allowing for the easy addition of ne
 
 *   **Extensible:** Easily add new agents for different tasks.
 *   **Asynchronous:** Uses `asyncio` for concurrent API interactions.
-*   **Resumable:** Progress is saved in an SQLite database. You can stop and restart at any time without losing your place.
+*   **Email Reporting:** The `insights` agent can automatically email reports via SMTP.
+*   **Resumable:** Progress is saved in an SQLite database.
+*   **Environment Aware:** Supports separate development and production databases using `X_AGENT_ENV`.
 *   **Rate Limit Handling:** Automatically handles X API rate limits with built-in wait-and-resume logic.
 *   **Robust:** Gracefully handles deleted, suspended, or missing accounts.
 *   **Resilient:** Includes automatic retries for transient network errors.
-*   **Safe:** Validates configuration on startup and offers a `--dry-run` mode to preview actions without executing them.
-*   **Modern CLI:** Built with `Typer` for an intuitive command-line experience.
+*   **Safe:** Validates configuration on startup and offers a `--dry-run` mode.
+*   **Modern CLI:** Built with `Typer` with clear visibility into which database/environment is active.
 
 ## Requirements
 
@@ -29,58 +31,70 @@ The framework is designed to be extensible, allowing for the easy addition of ne
     ```
 
 2.  **Install `uv`:**
-    This project uses `uv` for dependency management. You can install it with:
+    This project uses `uv` for dependency management.
     ```bash
     pip install uv
     ```
 
 3.  **Install Dependencies:**
-    Install the project and synchronize the environment:
     ```bash
     uv sync
     ```
 
 4.  **Set Up Your Credentials:**
     *   Copy the example `.env.example` file to a new `.env` file: `cp .env.example .env`
-    *   Open the `.env` file and replace the placeholder values with your actual credentials from your X Developer App.
+    *   Open the `.env` file and fill in your X API credentials and SMTP settings for email reporting.
 
-    Your `.env` file should look like this:
-    ```
-    X_API_KEY="YOUR_REAL_API_KEY"
-    X_API_KEY_SECRET="YOUR_REAL_API_KEY_SECRET"
-    X_ACCESS_TOKEN="YOUR_REAL_ACCESS_TOKEN"
-    X_ACCESS_TOKEN_SECRET="YOUR_REAL_ACCESS_TOKEN_SECRET"
+    ```env
+    # X API
+    X_API_KEY="..."
+    X_API_KEY_SECRET="..."
+    X_ACCESS_TOKEN="..."
+    X_ACCESS_TOKEN_SECRET="..."
+
+    # Optional: Environment (defaults to development)
+    X_AGENT_ENV=production
+
+    # Email (Required for --email flag)
+    SMTP_HOST="smtp.gmail.com"
+    SMTP_PORT=587
+    SMTP_USER="your-email@example.com"
+    SMTP_PASSWORD="your-app-password"
+    REPORT_SENDER="sender@example.com"
+    REPORT_RECIPIENT="recipient@example.com"
     ```
 
 ## How to Run
 
-Use the `x-agent` command followed by the agent you want to run.
-
 ### Available Agents
 
-*   **Unblocker:** Unblocks all blocked accounts.
+*   **Insights:** Gathers and reports account metrics.
     ```bash
-    uv run x-agent unblock
-    ```
-    To unblock a specific user ID:
-    ```bash
-    uv run x-agent unblock --user-id 123456789
+    uv run x-agent insights [--email]
     ```
 
-*   **Unfollow:** Detects who has unfollowed you since the last run. It does NOT unfollow anyone automatically; it is a monitoring tool.
+*   **Unblocker:** Mass unblocks accounts.
+    ```bash
+    uv run x-agent unblock [--user-id ID] [--refresh]
+    ```
+
+*   **Unfollow:** Detects who has unfollowed you since the last run.
     ```bash
     uv run x-agent unfollow
-    ```
-
-*   **Insights:** Gathers and reports daily follower/following metrics.
-    ```bash
-    uv run x-agent insights
     ```
 
 *   **Blocked IDs:** Lists all currently blocked user IDs.
     ```bash
     uv run x-agent blocked-ids
     ```
+
+### Automation
+
+You can set up a daily automated report using the included cron setup helper:
+```bash
+python3 scripts/setup_cron.py
+```
+This will install a daily cronjob (default 9:00 AM) that runs the insights agent with email reporting enabled.
 
 ### Global Options
 
@@ -91,14 +105,10 @@ uv run x-agent unblock --dry-run
 
 Use `--debug` with any command for detailed logging:
 ```bash
-uv run x-agent unblock --debug
+uv run x-agent insights --debug
 ```
 
 For more information, use the `--help` flag:
 ```bash
 uv run x-agent --help
 ```
-
-### Important Note on Execution Time
-
-The X API has strict rate limits. The script automatically handles these by pausing when necessary. For mass unblocking, please be patient as the process can take several hours depending on the number of accounts. The script is designed to run unattended until completion.
