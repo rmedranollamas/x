@@ -300,6 +300,34 @@ class XService:
 
     @retry(
         stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception(is_transient_error),
+        reraise=True,
+    )
+    async def get_users_by_ids(self, user_ids: list[int]) -> list[tweepy.User]:
+        """
+        Resolves a list of user IDs to user objects using the v2 API.
+        X API v2 allows up to 100 IDs per request.
+        """
+        if not user_ids:
+            return []
+
+        all_users = []
+        # Chunk IDs into groups of 100
+        for i in range(0, len(user_ids), 100):
+            chunk = user_ids[i : i + 100]
+            try:
+                response = await self.client.get_users(ids=chunk)
+                if response.data:
+                    all_users.extend(response.data)
+            except Exception as e:
+                logging.warning(f"Error fetching users for chunk starting at {i}: {e}")
+                if is_transient_error(e):
+                    raise
+        return all_users
+
+    @retry(
+        stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=5),
         retry=retry_if_exception(is_transient_error),
         reraise=True,

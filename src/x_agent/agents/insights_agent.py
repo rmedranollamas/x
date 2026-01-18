@@ -51,13 +51,36 @@ class InsightsAgent(BaseAgent):
             return None
 
         metrics = me_data.public_metrics
-        current_followers = metrics.get("followers_count", 0)
-        current_following = metrics.get("following_count", 0)
-        current_tweets = metrics.get("tweet_count", 0)
-        current_listed = metrics.get("listed_count", 0)
+        current_followers_count = metrics.get("followers_count", 0)
+        current_following_count = metrics.get("following_count", 0)
+        current_tweets_count = metrics.get("tweet_count", 0)
+        current_listed_count = metrics.get("listed_count", 0)
         created_at = me_data.created_at
 
-        # Get historical metrics from the database
+        # Follower change detection (logic from UnfollowAgent)
+        logging.info("Fetching current follower IDs for change detection...")
+        current_follower_ids = await self.x_service.get_follower_user_ids()
+        previous_follower_ids = await asyncio.to_thread(self.db.get_all_follower_ids)
+
+        new_follower_users = []
+        lost_follower_users = []
+
+        if previous_follower_ids:
+            new_ids = list(current_follower_ids - previous_follower_ids)
+            lost_ids = list(previous_follower_ids - current_follower_ids)
+
+            if new_ids:
+                logging.info(f"Resolving {len(new_ids)} new follower usernames...")
+                new_follower_users = await self.x_service.get_users_by_ids(new_ids)
+
+            if lost_ids:
+                logging.info(f"Resolving {len(lost_ids)} lost follower usernames...")
+                lost_follower_users = await self.x_service.get_users_by_ids(lost_ids)
+
+        # Update follower list in DB
+        await asyncio.to_thread(self.db.replace_followers, current_follower_ids)
+
+        # Get historical metrics from the database for timeframes
         comparisons = {
             "Previous": await asyncio.to_thread(self.db.get_latest_insight),
             "24h Ago": await asyncio.to_thread(self.db.get_insight_at_offset, 1),
@@ -67,12 +90,14 @@ class InsightsAgent(BaseAgent):
 
         # Generate the report
         report = self._generate_report(
-            current_followers,
-            current_following,
-            current_tweets,
-            current_listed,
+            current_followers_count,
+            current_following_count,
+            current_tweets_count,
+            current_listed_count,
             created_at,
             comparisons,
+            new_follower_users,
+            lost_follower_users,
         )
 
         # Print to stdout as before
@@ -81,10 +106,10 @@ class InsightsAgent(BaseAgent):
         # Save the new metrics to the database
         await asyncio.to_thread(
             self.db.add_insight,
-            current_followers,
-            current_following,
-            current_tweets,
-            current_listed,
+            current_followers_count,
+            current_following_count,
+            current_tweets_count,
+            current_listed_count,
         )
 
         logging.info("Insights agent finished successfully.")
@@ -98,6 +123,8 @@ class InsightsAgent(BaseAgent):
         current_listed: int,
         created_at: Optional[Union[datetime, time.struct_time]],
         comparisons: dict[str, Optional[sqlite3.Row]],
+        new_followers: list[tweepy.User],
+        lost_followers: list[tweepy.User],
     ) -> str:
         """
         Generates a comprehensive report and returns it as a string.
@@ -116,7 +143,22 @@ class InsightsAgent(BaseAgent):
         lines.append(f"Listed In:  {current_listed:<8}")
         lines.append("-" * 55)
 
-        # 2. Account Vitality (New Section)
+        # 2. Follower Changes (New Section)
+        if new_followers or lost_followers:
+            lines.append("                FOLLOWER CHANGES                 ")
+            if new_followers:
+                lines.append(
+                    f"New ({len(new_followers)}): "
+                    + ", ".join([f"@{u.username}" for u in new_followers])
+                )
+            if lost_followers:
+                lines.append(
+                    f"Lost ({len(lost_followers)}): "
+                    + ", ".join([f"@{u.username}" for u in lost_followers])
+                )
+            lines.append("-" * 55)
+
+        # 3. Account Vitality
         if created_at:
             # Tweepy created_at is often a datetime object in newer versions,
             # but let's handle it safely.
