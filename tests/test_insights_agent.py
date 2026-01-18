@@ -58,7 +58,7 @@ async def test_execute_first_run(
     mock_db_manager.add_insight.assert_called_once_with(100, 50, 10, 5)
     mock_db_manager.replace_followers.assert_called_once_with({1, 2, 3})
 
-    assert "Followers:  100" in report
+    assert "Followers: 100" in report
     assert "Following: 50" in report
 
 
@@ -109,7 +109,10 @@ async def test_execute_with_follower_changes(
 
     report = await insights_agent.execute()
 
-    assert "FOLLOWER CHANGES" in report
-    assert "New (2): @new_user4, @new_user5" in report
-    assert "Lost (1): @lost_user3" in report
+    assert "FOLLOWERS LOG" in report
+    assert "New (2):" in report
+    assert " + @new_user4" in report
+    assert " + @new_user5" in report
+    assert "Lost (1):" in report
+    assert " - @lost_user3" in report
     mock_db_manager.replace_followers.assert_called_once_with({1, 2, 4, 5})
