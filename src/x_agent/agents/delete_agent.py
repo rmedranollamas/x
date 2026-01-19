@@ -18,6 +18,12 @@ class DeleteAgent(BaseAgent):
     Supports both live API fetching and X data archive files.
     """
 
+    # Deletion Thresholds
+    CRITICAL_AGE_DAYS = 365
+    GRACE_PERIOD_DAYS = 7
+    POPULAR_TWEET_THRESHOLD = 20
+    POPULAR_REPLY_THRESHOLD = 5
+
     def __init__(
         self,
         x_service: XService,
@@ -162,8 +168,8 @@ class DeleteAgent(BaseAgent):
         age = now - created_at
 
         # Rule 1: Older than 1 year - Delete regardless
-        if age > timedelta(days=365):
-            reason = "older than 1 year"
+        if age > timedelta(days=self.CRITICAL_AGE_DAYS):
+            reason = f"older than {self.CRITICAL_AGE_DAYS} days"
             await self._delete_tweet(tweet, likes + retweets, is_response, reason)
             return
 
@@ -174,7 +180,7 @@ class DeleteAgent(BaseAgent):
             return
 
         # Rule 3: Less than 7 days - Keep
-        if age < timedelta(days=7):
+        if age < timedelta(days=self.GRACE_PERIOD_DAYS):
             logging.info(f"KEEP [Recent]    ID: {tweet_id} (Age: {age.days}d)")
             self.stats["skipped"] += 1
             return
@@ -182,14 +188,14 @@ class DeleteAgent(BaseAgent):
         # Rule 4: Engagement thresholds (7 days to 1 year)
         engagement_score = likes + retweets
 
-        if not is_response and engagement_score >= 20:
+        if not is_response and engagement_score >= self.POPULAR_TWEET_THRESHOLD:
             logging.info(
                 f"KEEP [Popular]   ID: {tweet_id} ({engagement_score} likes+rt)"
             )
             self.stats["skipped"] += 1
             return
 
-        if is_response and engagement_score >= 5:
+        if is_response and engagement_score >= self.POPULAR_REPLY_THRESHOLD:
             logging.info(
                 f"KEEP [Pop-Reply] ID: {tweet_id} ({engagement_score} likes+rt)"
             )
@@ -224,7 +230,7 @@ class DeleteAgent(BaseAgent):
                     tweet_id,
                     text,
                     tweet.created_at.isoformat(),
-                    engagement,  # We store engagement score in the 'views' column for simplicity
+                    engagement,  # We store engagement score in the 'engagement_score' column (to be renamed)
                     is_response,
                 )
             else:

@@ -72,23 +72,31 @@ def db_info():
     typer.echo(f"Is Dev: {settings.is_dev}")
 
 
-def _run_agent(agent_class, debug: bool, dry_run: bool = False, **kwargs):
+async def _execute_agent(agent_class, debug: bool, email: bool = False, **kwargs):
     """
-    Helper to initialize service and run an agent.
+    Shared helper to initialize service, run an agent, and optionally send an email report.
     """
     setup_logging(debug)
     x_service = XService()
     db_manager = DatabaseManager()
-    agent = agent_class(x_service, db_manager, dry_run=dry_run, **kwargs)
-
-    async def _async_run():
-        try:
-            return await agent.execute()
-        finally:
-            await x_service.close()
+    agent = agent_class(x_service, db_manager, **kwargs)
 
     try:
-        return asyncio.run(_async_run())
+        report = await agent.execute()
+        if email and report:
+            await send_report_email(report)
+    finally:
+        await x_service.close()
+
+
+def _run_agent(agent_class, debug: bool, dry_run: bool = False, **kwargs):
+    """
+    Legacy helper to run an agent without email support.
+    """
+    try:
+        return asyncio.run(
+            _execute_agent(agent_class, debug, dry_run=dry_run, **kwargs)
+        )
     except Exception as e:
         logging.error(f"An unexpected error occurred: {e}", exc_info=True)
         sys.exit(1)
@@ -127,21 +135,8 @@ def insights(
     """
     Run the insights agent to gather and report account metrics.
     """
-    setup_logging(debug)
-    x_service = XService()
-    db_manager = DatabaseManager()
-    agent = InsightsAgent(x_service, db_manager)
-
-    async def _run():
-        try:
-            report = await agent.execute()
-            if email and report:
-                await send_report_email(report)
-        finally:
-            await x_service.close()
-
     try:
-        asyncio.run(_run())
+        asyncio.run(_execute_agent(InsightsAgent, debug, email=email))
     except Exception as e:
         logging.error(f"An unexpected error occurred: {e}", exc_info=True)
         sys.exit(1)
@@ -183,27 +178,17 @@ def delete(
     """
     Run the delete agent to remove old tweets based on engagement rules.
     """
-    setup_logging(debug)
-    x_service = XService()
-    db_manager = DatabaseManager()
-    agent = DeleteAgent(
-        x_service,
-        db_manager,
-        dry_run=dry_run,
-        protected_ids=protected_ids,
-        archive_path=archive,
-    )
-
-    async def _run():
-        try:
-            report = await agent.execute()
-            if email and report:
-                await send_report_email(report)
-        finally:
-            await x_service.close()
-
     try:
-        asyncio.run(_run())
+        asyncio.run(
+            _execute_agent(
+                DeleteAgent,
+                debug,
+                email=email,
+                dry_run=dry_run,
+                protected_ids=protected_ids,
+                archive_path=archive,
+            )
+        )
     except Exception as e:
         logging.error(f"An unexpected error occurred: {e}", exc_info=True)
         sys.exit(1)

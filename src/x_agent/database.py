@@ -256,7 +256,7 @@ class DatabaseManager:
         tweet_id: int,
         text: str,
         created_at: str,
-        views: int,
+        engagement_score: int,
         is_response: bool,
     ) -> None:
         """Logs a deleted tweet for audit purposes."""
@@ -264,10 +264,10 @@ class DatabaseManager:
             cursor = conn.cursor()
             cursor.execute(
                 """
-                INSERT OR IGNORE INTO deleted_tweets (tweet_id, text, created_at, views, is_response)
+                INSERT OR IGNORE INTO deleted_tweets (tweet_id, text, created_at, engagement_score, is_response)
                 VALUES (?, ?, ?, ?, ?)
                 """,
-                (tweet_id, text, created_at, views, is_response),
+                (tweet_id, text, created_at, engagement_score, is_response),
             )
 
     def get_deleted_count(self) -> int:

@@ -40,6 +40,9 @@ Python CLI framework for X (Twitter) account management via modular agents.
 ## Running the Tool
 
 1. `uv sync`
+
 1. `cp .env.example .env` (Add SMTP settings for email reporting)
+
 1. `uv run x-agent [AGENT] [--email] [--debug]`
+
 1. `python3 scripts/setup_cron.py` to automate.
