@@ -176,6 +176,9 @@ def delete(
     protected_ids: Optional[List[int]] = typer.Option(
         None, "--protected-id", help="Tweet IDs to protect from deletion."
     ),
+    archive: Optional[str] = typer.Option(
+        None, "--archive", help="Path to X data archive (tweets.js)."
+    ),
 ):
     """
     Run the delete agent to remove old tweets based on engagement rules.
@@ -184,7 +187,11 @@ def delete(
     x_service = XService()
     db_manager = DatabaseManager()
     agent = DeleteAgent(
-        x_service, db_manager, dry_run=dry_run, protected_ids=protected_ids
+        x_service,
+        db_manager,
+        dry_run=dry_run,
+        protected_ids=protected_ids,
+        archive_path=archive,
     )
 
     async def _run():
