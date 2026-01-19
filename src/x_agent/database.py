@@ -250,3 +250,29 @@ class DatabaseManager:
             cursor = conn.cursor()
             data = [(uid,) for uid in user_ids]
             cursor.executemany("INSERT INTO unfollows (user_id) VALUES (?)", data)
+
+    def log_deleted_tweet(
+        self,
+        tweet_id: int,
+        text: str,
+        created_at: str,
+        views: int,
+        is_response: bool,
+    ) -> None:
+        """Logs a deleted tweet for audit purposes."""
+        with self.transaction() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT OR IGNORE INTO deleted_tweets (tweet_id, text, created_at, views, is_response)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (tweet_id, text, created_at, views, is_response),
+            )
+
+    def get_deleted_count(self) -> int:
+        """Returns the total number of logged deleted tweets."""
+        with self.transaction() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM deleted_tweets")
+            return cursor.fetchone()[0]

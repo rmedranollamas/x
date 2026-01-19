@@ -18,11 +18,14 @@ def is_transient_error(exception):
     """
     if isinstance(exception, tweepy.errors.TweepyException):
         # Retry on 5xx errors or connection issues
-        if (
-            isinstance(exception, tweepy.errors.HTTPException)
-            and exception.response.status_code >= 500
-        ):
-            return True
+        if isinstance(exception, tweepy.errors.HTTPException):
+            # v1.1 / Sync client uses status_code
+            # v2 / Async client uses status
+            status = getattr(exception.response, "status_code", None) or getattr(
+                exception.response, "status", None
+            )
+            if status and status >= 500:
+                return True
         # Check for connection errors (often wrapped)
         return "Connection" in str(exception) or "Timeout" in str(exception)
     return False
@@ -51,16 +54,18 @@ class XService:
         )
         self.api_v1 = tweepy.API(auth, wait_on_rate_limit=True)
         self.user_id: int | None = None
+        self.pinned_tweet_id: int | None = None
         self.v1_lock = asyncio.Lock()
 
     async def initialize(self) -> None:
         """Authenticates and retrieves the current user's ID."""
         try:
             logging.debug("Authenticating...")
-            me = await self.client.get_me()
+            me = await self.client.get_me(user_fields=["pinned_tweet_id"])
             if not me.data:
                 raise Exception("Authentication successful but no user data returned.")
             self.user_id = me.data.id
+            self.pinned_tweet_id = me.data.pinned_tweet_id
             logging.info(f"Authenticated as {me.data.username} (ID: {self.user_id})")
         except Exception as e:
             logging.error(f"Authentication failed: {e}", exc_info=True)
@@ -346,3 +351,69 @@ class XService:
                 raise
             logging.warning(f"Failed to unfollow {user_id}: {e}")
             return "FAILED"
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception(is_transient_error),
+        reraise=True,
+    )
+    async def get_user_tweets_v1(
+        self, user_id: int, max_id: int | None = None
+    ) -> list[tweepy.models.Status]:
+        """
+        Fetches a page of tweets using v1.1 API (Legacy/Free Tier).
+        Uses max_id for pagination instead of tokens.
+        """
+        async with self.v1_lock:
+            return await asyncio.to_thread(
+                self.api_v1.user_timeline,
+                user_id=user_id,
+                count=200,
+                max_id=max_id,
+                include_rts=False,
+                tweet_mode="extended",
+            )
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception(is_transient_error),
+        reraise=True,
+    )
+    async def get_user_tweets(
+        self, user_id: int, pagination_token: str | None = None
+    ) -> tweepy.Response:
+        """
+        Fetches a page of tweets for a given user ID using v2 API.
+        Includes public metrics and creation date.
+        """
+        return await self.client.get_users_tweets(
+            id=user_id,
+            max_results=100,
+            pagination_token=pagination_token,
+            tweet_fields=["public_metrics", "created_at", "referenced_tweets"],
+            exclude=["retweets"],
+        )
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=5),
+        retry=retry_if_exception(is_transient_error),
+        reraise=True,
+    )
+    async def delete_tweet(self, tweet_id: int) -> bool:
+        """
+        Deletes a tweet using v2 API.
+        Returns True if successful, False otherwise.
+        """
+        try:
+            response = await self.client.delete_tweet(id=tweet_id)
+            if response.data:
+                return response.data.get("deleted", False)
+            return False
+        except Exception as e:
+            if is_transient_error(e):
+                raise
+            logging.warning(f"Failed to delete tweet {tweet_id}: {e}")
+            return False
