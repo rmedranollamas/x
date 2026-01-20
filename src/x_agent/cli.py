@@ -2,12 +2,13 @@ import sys
 import logging
 import typer
 import asyncio
-from typing import Optional
+from typing import Optional, List
 from .services.x_service import XService
 from .agents.unblock_agent import UnblockAgent
 from .agents.insights_agent import InsightsAgent
 from .agents.blocked_ids_agent import BlockedIdsAgent
 from .agents.unfollow_agent import UnfollowAgent
+from .agents.delete_agent import DeleteAgent
 from .utils.email_utils import send_report_email
 from .logging_setup import setup_logging
 from .config import settings
@@ -71,23 +72,31 @@ def db_info():
     typer.echo(f"Is Dev: {settings.is_dev}")
 
 
-def _run_agent(agent_class, debug: bool, dry_run: bool = False, **kwargs):
+async def _execute_agent(agent_class, debug: bool, email: bool = False, **kwargs):
     """
-    Helper to initialize service and run an agent.
+    Shared helper to initialize service, run an agent, and optionally send an email report.
     """
     setup_logging(debug)
     x_service = XService()
     db_manager = DatabaseManager()
-    agent = agent_class(x_service, db_manager, dry_run=dry_run, **kwargs)
-
-    async def _async_run():
-        try:
-            return await agent.execute()
-        finally:
-            await x_service.close()
+    agent = agent_class(x_service, db_manager, **kwargs)
 
     try:
-        return asyncio.run(_async_run())
+        report = await agent.execute()
+        if email and report:
+            await send_report_email(report)
+    finally:
+        await x_service.close()
+
+
+def _run_agent(agent_class, debug: bool, dry_run: bool = False, **kwargs):
+    """
+    Legacy helper to run an agent without email support.
+    """
+    try:
+        return asyncio.run(
+            _execute_agent(agent_class, debug, dry_run=dry_run, **kwargs)
+        )
     except Exception as e:
         logging.error(f"An unexpected error occurred: {e}", exc_info=True)
         sys.exit(1)
@@ -126,21 +135,8 @@ def insights(
     """
     Run the insights agent to gather and report account metrics.
     """
-    setup_logging(debug)
-    x_service = XService()
-    db_manager = DatabaseManager()
-    agent = InsightsAgent(x_service, db_manager)
-
-    async def _run():
-        try:
-            report = await agent.execute()
-            if email and report:
-                await send_report_email(report)
-        finally:
-            await x_service.close()
-
     try:
-        asyncio.run(_run())
+        asyncio.run(_execute_agent(InsightsAgent, debug, email=email))
     except Exception as e:
         logging.error(f"An unexpected error occurred: {e}", exc_info=True)
         sys.exit(1)
@@ -159,6 +155,43 @@ def unfollow(
     Run the unfollow agent to detect who has unfollowed you.
     """
     _run_agent(UnfollowAgent, debug, dry_run=dry_run)
+
+
+@app.command()
+def delete(
+    debug: bool = typer.Option(
+        False, "--debug", help="Enable debug logging for detailed output."
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Simulate actions without making changes."
+    ),
+    email: bool = typer.Option(
+        False, "--email", help="Send the report via email after generation."
+    ),
+    protected_ids: Optional[List[int]] = typer.Option(
+        None, "--protected-id", help="Tweet IDs to protect from deletion."
+    ),
+    archive: Optional[str] = typer.Option(
+        None, "--archive", help="Path to X data archive (tweets.js)."
+    ),
+):
+    """
+    Run the delete agent to remove old tweets based on engagement rules.
+    """
+    try:
+        asyncio.run(
+            _execute_agent(
+                DeleteAgent,
+                debug,
+                email=email,
+                dry_run=dry_run,
+                protected_ids=protected_ids,
+                archive_path=archive,
+            )
+        )
+    except Exception as e:
+        logging.error(f"An unexpected error occurred: {e}", exc_info=True)
+        sys.exit(1)
 
 
 @app.command(name="blocked-ids")
