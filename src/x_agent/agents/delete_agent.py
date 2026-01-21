@@ -23,6 +23,8 @@ class DeleteAgent(BaseAgent):
     GRACE_PERIOD_DAYS = 7
     POPULAR_TWEET_THRESHOLD = 20
     POPULAR_REPLY_THRESHOLD = 5
+    LINK_TWEET_THRESHOLD = 10
+    LINK_REPLY_THRESHOLD = 3
 
     def __init__(
         self,
@@ -114,6 +116,8 @@ class DeleteAgent(BaseAgent):
                         self.retweet_count = int(data.get("retweet_count", 0))
                         self.in_reply_to_status_id = data.get("in_reply_to_status_id")
                         self.full_text = data.get("full_text", "")
+                        self.entities = data.get("entities", {})
+                        self.extended_entities = data.get("extended_entities", {})
 
                 tweet = MockStatus(tweet_raw)
                 await self._process_tweet(tweet, now)
@@ -159,53 +163,86 @@ class DeleteAgent(BaseAgent):
         if created_at.tzinfo is None:
             created_at = created_at.replace(tzinfo=timezone.utc)
 
-        likes = tweet.favorite_count
-        retweets = tweet.retweet_count
+        likes = int(tweet.favorite_count)
+        retweets = int(tweet.retweet_count)
+        engagement_score = likes + retweets
 
-        # Check if it's a response (reply)
+        # Metadata detection
+        text = getattr(tweet, "full_text", getattr(tweet, "text", ""))
         is_response = tweet.in_reply_to_status_id is not None
-
         age = now - created_at
 
-        # Rule 1: Older than 1 year - Delete regardless
-        if age > timedelta(days=self.CRITICAL_AGE_DAYS):
-            reason = f"older than {self.CRITICAL_AGE_DAYS} days"
-            await self._delete_tweet(tweet, likes + retweets, is_response, reason)
-            return
+        # Rich Metadata
+        entities = getattr(tweet, "entities", {})
+        ext_entities = getattr(tweet, "extended_entities", {})
+        has_media = bool(entities.get("media") or ext_entities.get("media"))
+        has_link = bool(entities.get("urls") and len(entities["urls"]) > 0)
+        is_thread = "1/" in text or "🧵" in text
+        is_retweet = text.startswith("RT @")
 
-        # Rule 2: Protected
+        # --- RULE 1: Protected IDs (Pinned, etc.) ---
         if tweet_id in self.protected_ids:
             logging.info(f"KEEP [Protected] ID: {tweet_id}")
             self.stats["skipped"] += 1
             return
 
-        # Rule 3: Less than 7 days - Keep
+        # --- RULE 2: Grace Period (< 7 days) ---
         if age < timedelta(days=self.GRACE_PERIOD_DAYS):
             logging.info(f"KEEP [Recent]    ID: {tweet_id} (Age: {age.days}d)")
             self.stats["skipped"] += 1
             return
 
-        # Rule 4: Engagement thresholds (7 days to 1 year)
-        engagement_score = likes + retweets
+        # --- RULE 3: Retweet Cleanup (> 30 days) ---
+        if is_retweet and age > timedelta(days=30):
+            reason = "old retweet (> 30 days)"
+            await self._delete_tweet(tweet, engagement_score, is_response, reason)
+            return
 
-        if not is_response and engagement_score >= self.POPULAR_TWEET_THRESHOLD:
-            logging.info(
-                f"KEEP [Popular]   ID: {tweet_id} ({engagement_score} likes+rt)"
-            )
+        # --- RULE 4: High Value Content (Threads & Media) ---
+        if is_thread:
+            logging.info(f"KEEP [Thread]    ID: {tweet_id}")
             self.stats["skipped"] += 1
             return
 
-        if is_response and engagement_score >= self.POPULAR_REPLY_THRESHOLD:
-            logging.info(
-                f"KEEP [Pop-Reply] ID: {tweet_id} ({engagement_score} likes+rt)"
-            )
+        if has_media:
+            logging.info(f"KEEP [Media]     ID: {tweet_id}")
             self.stats["skipped"] += 1
             return
 
-        # Rule 5: Otherwise, delete
-        reason = (
-            f"low engagement ({engagement_score} likes+rt, is_response={is_response})"
+        # --- RULE 5: Critical Age (> 1 year) ---
+        if age > timedelta(days=self.CRITICAL_AGE_DAYS):
+            reason = (
+                f"older than {self.CRITICAL_AGE_DAYS} days and no special protection"
+            )
+            await self._delete_tweet(tweet, engagement_score, is_response, reason)
+            return
+
+        # --- RULE 6: Engagement Thresholds (7 days to 1 year) ---
+        # Base threshold
+        threshold = (
+            self.POPULAR_REPLY_THRESHOLD
+            if is_response
+            else self.POPULAR_TWEET_THRESHOLD
         )
+
+        # Boost for links (lower threshold to keep informative content)
+        if has_link:
+            threshold = (
+                self.LINK_REPLY_THRESHOLD if is_response else self.LINK_TWEET_THRESHOLD
+            )
+
+        if engagement_score >= threshold:
+            kind = "Pop-Reply" if is_response else "Popular"
+            if has_link:
+                kind += "+Link"
+            logging.info(
+                f"KEEP [{kind:12}] ID: {tweet_id} ({engagement_score} likes+rt, threshold: {threshold})"
+            )
+            self.stats["skipped"] += 1
+            return
+
+        # --- RULE 7: Otherwise, delete ---
+        reason = f"low engagement ({engagement_score} < {threshold})"
         await self._delete_tweet(tweet, engagement_score, is_response, reason)
 
     async def _delete_tweet(self, tweet, engagement, is_response, reason):
