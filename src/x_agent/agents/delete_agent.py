@@ -21,6 +21,7 @@ class DeleteAgent(BaseAgent):
     # Deletion Thresholds
     CRITICAL_AGE_DAYS = 365
     GRACE_PERIOD_DAYS = 7
+    RETWEET_MAX_AGE_DAYS = 30
     POPULAR_TWEET_THRESHOLD = 20
     POPULAR_REPLY_THRESHOLD = 5
     LINK_TWEET_THRESHOLD = 10
@@ -176,7 +177,7 @@ class DeleteAgent(BaseAgent):
         entities = getattr(tweet, "entities", {})
         ext_entities = getattr(tweet, "extended_entities", {})
         has_media = bool(entities.get("media") or ext_entities.get("media"))
-        has_link = bool(entities.get("urls") and len(entities["urls"]) > 0)
+        has_link = bool(entities.get("urls"))
         is_thread = "1/" in text or "🧵" in text
         is_retweet = text.startswith("RT @")
 
@@ -193,8 +194,8 @@ class DeleteAgent(BaseAgent):
             return
 
         # --- RULE 3: Retweet Cleanup (> 30 days) ---
-        if is_retweet and age > timedelta(days=30):
-            reason = "old retweet (> 30 days)"
+        if is_retweet and age > timedelta(days=self.RETWEET_MAX_AGE_DAYS):
+            reason = f"old retweet (> {self.RETWEET_MAX_AGE_DAYS} days)"
             await self._delete_tweet(tweet, engagement_score, is_response, reason)
             return
 
@@ -218,17 +219,13 @@ class DeleteAgent(BaseAgent):
             return
 
         # --- RULE 6: Engagement Thresholds (7 days to 1 year) ---
-        # Base threshold
-        threshold = (
-            self.POPULAR_REPLY_THRESHOLD
-            if is_response
-            else self.POPULAR_TWEET_THRESHOLD
-        )
-
-        # Boost for links (lower threshold to keep informative content)
-        if has_link:
+        if is_response:
             threshold = (
-                self.LINK_REPLY_THRESHOLD if is_response else self.LINK_TWEET_THRESHOLD
+                self.LINK_REPLY_THRESHOLD if has_link else self.POPULAR_REPLY_THRESHOLD
+            )
+        else:
+            threshold = (
+                self.LINK_TWEET_THRESHOLD if has_link else self.POPULAR_TWEET_THRESHOLD
             )
 
         if engagement_score >= threshold:
