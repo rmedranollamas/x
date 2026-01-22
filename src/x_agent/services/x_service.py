@@ -371,7 +371,7 @@ class XService:
                 user_id=user_id,
                 count=200,
                 max_id=max_id,
-                include_rts=False,
+                include_rts=True,
                 tweet_mode="extended",
             )
 
