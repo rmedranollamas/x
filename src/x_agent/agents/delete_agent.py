@@ -117,6 +117,7 @@ class DeleteAgent(BaseAgent):
                         self.retweet_count = int(data.get("retweet_count", 0))
                         self.in_reply_to_status_id = data.get("in_reply_to_status_id")
                         self.full_text = data.get("full_text", "")
+                        self.text = self.full_text  # Robustness
                         self.entities = data.get("entities", {})
                         self.extended_entities = data.get("extended_entities", {})
 
@@ -159,6 +160,13 @@ class DeleteAgent(BaseAgent):
     async def _process_tweet(self, tweet, now: datetime):
         """Applies the rules to a single tweet (Status object) and deletes if necessary."""
         tweet_id = tweet.id
+
+        # Skip if already deleted (checkpointing)
+        if await asyncio.to_thread(self.db.is_tweet_deleted, tweet_id):
+            logging.debug(f"Skipping already deleted tweet: {tweet_id}")
+            self.stats["deleted"] += 1  # Count as deleted for progress tracking
+            return
+
         # v1.1 uses created_at as a datetime object already (usually)
         created_at = tweet.created_at
         if created_at.tzinfo is None:
@@ -264,9 +272,12 @@ class DeleteAgent(BaseAgent):
                     tweet_id,
                     text,
                     tweet.created_at.isoformat(),
-                    engagement,  # We store engagement score in the 'engagement_score' column (to be renamed)
+                    engagement,
                     is_response,
                 )
+                # Polite delay to avoid hammering the API
+                if not self.dry_run:
+                    await asyncio.sleep(1)
             else:
                 self.stats["errors"] += 1
 

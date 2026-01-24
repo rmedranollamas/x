@@ -276,3 +276,12 @@ class DatabaseManager:
             cursor = conn.cursor()
             cursor.execute("SELECT COUNT(*) FROM deleted_tweets")
             return cursor.fetchone()[0]
+
+    def is_tweet_deleted(self, tweet_id: int) -> bool:
+        """Checks if a tweet ID is already in the deleted_tweets table."""
+        with self.transaction() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT 1 FROM deleted_tweets WHERE tweet_id = ?", (tweet_id,)
+            )
+            return cursor.fetchone() is not None
