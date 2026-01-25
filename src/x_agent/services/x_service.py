@@ -16,6 +16,13 @@ def is_transient_error(exception):
     """
     Returns True if the exception is likely a transient network/server error.
     """
+    # Catching 'NoneType' object has no attribute 'items' which is a common side-effect
+    # of a failed retry/sleep cycle in tweepy's async client.
+    if isinstance(
+        exception, AttributeError
+    ) and "'NoneType' object has no attribute 'items'" in str(exception):
+        return True
+
     if isinstance(exception, tweepy.errors.TweepyException):
         # Retry on 5xx errors or connection issues
         if isinstance(exception, tweepy.errors.HTTPException):
@@ -39,13 +46,7 @@ class XService:
 
     def __init__(self) -> None:
         """Initializes the XService with both async and sync clients."""
-        self.client = tweepy.asynchronous.AsyncClient(
-            consumer_key=settings.x_api_key,
-            consumer_secret=settings.x_api_key_secret,
-            access_token=settings.x_access_token,
-            access_token_secret=settings.x_access_token_secret,
-            wait_on_rate_limit=True,
-        )
+        self._init_v2_client()
         auth = tweepy.OAuth1UserHandler(
             settings.x_api_key,
             settings.x_api_key_secret,
@@ -56,6 +57,22 @@ class XService:
         self.user_id: int | None = None
         self.pinned_tweet_id: int | None = None
         self.v1_lock = asyncio.Lock()
+
+    def _init_v2_client(self) -> None:
+        """Initializes or re-initializes the v2 AsyncClient."""
+        self.client = tweepy.asynchronous.AsyncClient(
+            consumer_key=settings.x_api_key,
+            consumer_secret=settings.x_api_key_secret,
+            access_token=settings.x_access_token,
+            access_token_secret=settings.x_access_token_secret,
+            wait_on_rate_limit=False,  # We handle rate limits manually to avoid corruption
+        )
+
+    async def _recreate_v2_client(self) -> None:
+        """Closes the current v2 session and creates a new one."""
+        logging.info("Re-creating X API v2 session to recover from corruption...")
+        await self.close()
+        self._init_v2_client()
 
     async def initialize(self) -> None:
         """Authenticates and retrieves the current user's ID."""
@@ -388,13 +405,25 @@ class XService:
         Fetches a page of tweets for a given user ID using v2 API.
         Includes public metrics and creation date.
         """
-        return await self.client.get_users_tweets(
-            id=user_id,
-            max_results=100,
-            pagination_token=pagination_token,
-            tweet_fields=["public_metrics", "created_at", "referenced_tweets"],
-            exclude=["retweets"],
-        )
+        try:
+            return await self.client.get_users_tweets(
+                id=user_id,
+                max_results=100,
+                pagination_token=pagination_token,
+                tweet_fields=["public_metrics", "created_at", "referenced_tweets"],
+                exclude=["retweets"],
+            )
+        except tweepy.errors.TooManyRequests:
+            logging.warning("Rate limit hit (v2). Sleeping for 15 minutes...")
+            await asyncio.sleep(901)
+            await self._recreate_v2_client()
+            raise
+        except Exception as e:
+            if is_transient_error(e):
+                if "NoneType" in str(e):
+                    await self._recreate_v2_client()
+                raise
+            raise
 
     @retry(
         stop=stop_after_attempt(3),
@@ -412,8 +441,15 @@ class XService:
             if response.data:
                 return response.data.get("deleted", False)
             return False
+        except tweepy.errors.TooManyRequests:
+            logging.warning("Rate limit hit (v2). Sleeping for 15 minutes...")
+            await asyncio.sleep(901)
+            await self._recreate_v2_client()
+            raise
         except Exception as e:
             if is_transient_error(e):
+                if "NoneType" in str(e):
+                    await self._recreate_v2_client()
                 raise
             logging.warning(f"Failed to delete tweet {tweet_id}: {e}")
             return False
