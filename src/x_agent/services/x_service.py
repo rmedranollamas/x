@@ -342,10 +342,23 @@ class XService:
                 response = await self.client.get_users(ids=chunk)
                 if response.data:
                     all_users.extend(response.data)
+            except tweepy.errors.TooManyRequests:
+                logging.warning("Rate limit hit (v2). Sleeping for 15 minutes...")
+                await asyncio.sleep(901)
+                await self._recreate_v2_client()
+                # Retry this specific chunk
+                remaining_users = await self.get_users_by_ids(user_ids[i:])
+                all_users.extend(remaining_users)
+                break
             except Exception as e:
-                logging.warning(f"Error fetching users for chunk starting at {i}: {e}")
                 if is_transient_error(e):
+                    if "NoneType" in str(e):
+                        await self._recreate_v2_client()
+                        remaining_users = await self.get_users_by_ids(user_ids[i:])
+                        all_users.extend(remaining_users)
+                        break
                     raise
+                logging.warning(f"Error fetching users for chunk starting at {i}: {e}")
         return all_users
 
     @retry(
@@ -417,11 +430,12 @@ class XService:
             logging.warning("Rate limit hit (v2). Sleeping for 15 minutes...")
             await asyncio.sleep(901)
             await self._recreate_v2_client()
-            raise
+            return await self.get_user_tweets(user_id, pagination_token)
         except Exception as e:
             if is_transient_error(e):
                 if "NoneType" in str(e):
                     await self._recreate_v2_client()
+                    return await self.get_user_tweets(user_id, pagination_token)
                 raise
             raise
 
@@ -445,11 +459,13 @@ class XService:
             logging.warning("Rate limit hit (v2). Sleeping for 15 minutes...")
             await asyncio.sleep(901)
             await self._recreate_v2_client()
-            raise
+            # Recursion gives us a fresh set of tenacity attempts
+            return await self.delete_tweet(tweet_id)
         except Exception as e:
             if is_transient_error(e):
                 if "NoneType" in str(e):
                     await self._recreate_v2_client()
+                    return await self.delete_tweet(tweet_id)
                 raise
             logging.warning(f"Failed to delete tweet {tweet_id}: {e}")
             return False
