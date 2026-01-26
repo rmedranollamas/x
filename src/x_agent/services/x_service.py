@@ -326,6 +326,8 @@ class XService:
     ) -> None:
         """Handles v2 rate limits by sleeping until the reset time or Retry-After."""
         headers = exception.response.headers
+        logging.warning(f"RATE LIMIT HEADERS: {dict(headers)}")
+
         reset_at = headers.get("x-rate-limit-reset")
         retry_after = headers.get("retry-after")
 
@@ -340,7 +342,12 @@ class XService:
                 )
                 await asyncio.sleep(wait_seconds)
             else:
-                await asyncio.sleep(60)
+                # If reset is in the past, X might be applying a daily cap
+                logging.warning(
+                    "Reset time is in the past. This often indicates a Daily Limit (50/day on Free tier)."
+                )
+                logging.warning("Sleeping for 30 minutes as backoff...")
+                await asyncio.sleep(1801)
         elif retry_after:
             wait_seconds = int(retry_after) + 5
             logging.warning(
@@ -349,9 +356,8 @@ class XService:
             await asyncio.sleep(wait_seconds)
         else:
             logging.warning(
-                f"Rate limit hit (v2). No reset header found. Headers: {dict(headers)}"
+                "Rate limit hit (v2). No reset header. Sleeping for 15 minutes..."
             )
-            logging.warning("Sleeping for 15 minutes as fallback...")
             await asyncio.sleep(901)
 
         await self._recreate_v2_client()
