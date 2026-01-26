@@ -1,6 +1,7 @@
 import sys
 import asyncio
 import logging
+from datetime import datetime, timezone
 import tweepy.asynchronous
 import tweepy
 from tenacity import (
@@ -320,6 +321,41 @@ class XService:
         )
         return follower_ids
 
+    async def _handle_v2_rate_limit(
+        self, exception: tweepy.errors.TooManyRequests
+    ) -> None:
+        """Handles v2 rate limits by sleeping until the reset time or Retry-After."""
+        headers = exception.response.headers
+        reset_at = headers.get("x-rate-limit-reset")
+        retry_after = headers.get("retry-after")
+
+        if reset_at:
+            reset_time = datetime.fromtimestamp(int(reset_at), tz=timezone.utc)
+            # Add a small buffer of 5 seconds
+            wait_seconds = (reset_time - datetime.now(timezone.utc)).total_seconds() + 5
+            if wait_seconds > 0:
+                logging.warning(
+                    f"Rate limit hit (v2). Resets at {reset_time.strftime('%Y-%m-%d %H:%M:%S UTC')}. "
+                    f"Sleeping for {wait_seconds:.0f} seconds..."
+                )
+                await asyncio.sleep(wait_seconds)
+            else:
+                await asyncio.sleep(60)
+        elif retry_after:
+            wait_seconds = int(retry_after) + 5
+            logging.warning(
+                f"Rate limit hit (v2). Retry-After: {retry_after}s. Sleeping for {wait_seconds}s..."
+            )
+            await asyncio.sleep(wait_seconds)
+        else:
+            logging.warning(
+                f"Rate limit hit (v2). No reset header found. Headers: {dict(headers)}"
+            )
+            logging.warning("Sleeping for 15 minutes as fallback...")
+            await asyncio.sleep(901)
+
+        await self._recreate_v2_client()
+
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),
@@ -342,10 +378,8 @@ class XService:
                 response = await self.client.get_users(ids=chunk)
                 if response.data:
                     all_users.extend(response.data)
-            except tweepy.errors.TooManyRequests:
-                logging.warning("Rate limit hit (v2). Sleeping for 15 minutes...")
-                await asyncio.sleep(901)
-                await self._recreate_v2_client()
+            except tweepy.errors.TooManyRequests as e:
+                await self._handle_v2_rate_limit(e)
                 # Retry this specific chunk
                 remaining_users = await self.get_users_by_ids(user_ids[i:])
                 all_users.extend(remaining_users)
@@ -426,10 +460,8 @@ class XService:
                 tweet_fields=["public_metrics", "created_at", "referenced_tweets"],
                 exclude=["retweets"],
             )
-        except tweepy.errors.TooManyRequests:
-            logging.warning("Rate limit hit (v2). Sleeping for 15 minutes...")
-            await asyncio.sleep(901)
-            await self._recreate_v2_client()
+        except tweepy.errors.TooManyRequests as e:
+            await self._handle_v2_rate_limit(e)
             return await self.get_user_tweets(user_id, pagination_token)
         except Exception as e:
             if is_transient_error(e):
@@ -455,10 +487,8 @@ class XService:
             if response.data:
                 return response.data.get("deleted", False)
             return False
-        except tweepy.errors.TooManyRequests:
-            logging.warning("Rate limit hit (v2). Sleeping for 15 minutes...")
-            await asyncio.sleep(901)
-            await self._recreate_v2_client()
+        except tweepy.errors.TooManyRequests as e:
+            await self._handle_v2_rate_limit(e)
             # Recursion gives us a fresh set of tenacity attempts
             return await self.delete_tweet(tweet_id)
         except Exception as e:
