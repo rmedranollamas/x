@@ -79,12 +79,13 @@ async def _execute_agent(agent_class, debug: bool, email: bool = False, **kwargs
     setup_logging(debug)
     x_service = XService()
     db_manager = DatabaseManager()
-    agent = agent_class(x_service, db_manager, **kwargs)
-
     try:
+        agent = agent_class(x_service, db_manager, **kwargs)
         report = await agent.execute()
         if email and report:
             await send_report_email(report)
+    except Exception:
+        raise
     finally:
         await x_service.close()
 
