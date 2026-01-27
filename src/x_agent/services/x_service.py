@@ -321,46 +321,102 @@ class XService:
         )
         return follower_ids
 
-    async def _handle_v2_rate_limit(
-        self, exception: tweepy.errors.TooManyRequests
-    ) -> None:
-        """Handles v2 rate limits by sleeping until the reset time or Retry-After."""
-        headers = exception.response.headers
-        logging.warning(f"RATE LIMIT HEADERS: {dict(headers)}")
+        async def _handle_v2_rate_limit(
+            self, exception: tweepy.errors.TooManyRequests
+        ) -> None:
+            """Handles v2 rate limits by sleeping until the reset time or Retry-After."""
 
-        reset_at = headers.get("x-rate-limit-reset")
-        retry_after = headers.get("retry-after")
+            headers = exception.response.headers
 
-        if reset_at:
-            reset_time = datetime.fromtimestamp(int(reset_at), tz=timezone.utc)
-            # Add a small buffer of 5 seconds
-            wait_seconds = (reset_time - datetime.now(timezone.utc)).total_seconds() + 5
-            if wait_seconds > 0:
-                logging.warning(
-                    f"Rate limit hit (v2). Resets at {reset_time.strftime('%Y-%m-%d %H:%M:%S UTC')}. "
-                    f"Sleeping for {wait_seconds:.0f} seconds..."
+            logging.warning(f"RATE LIMIT HEADERS: {dict(headers)}")
+
+            # Check for Daily Limits (Common on Free Tier)
+
+            app_remaining = headers.get("x-app-limit-24hour-remaining")
+
+            user_remaining = headers.get("x-user-limit-24hour-remaining")
+
+            app_reset = headers.get("x-app-limit-24hour-reset")
+
+            user_reset = headers.get("x-user-limit-24hour-reset")
+
+            daily_reset_ts = None
+
+            if app_remaining == "0" and app_reset:
+                daily_reset_ts = int(app_reset)
+
+            elif user_remaining == "0" and user_reset:
+                daily_reset_ts = int(user_reset)
+
+            if daily_reset_ts:
+                reset_time = datetime.fromtimestamp(daily_reset_ts, tz=timezone.utc)
+
+                wait_seconds = (
+                    reset_time - datetime.now(timezone.utc)
+                ).total_seconds() + 60
+
+                logging.error(
+                    f"🛑 DAILY RATE LIMIT REACHED (v2). Quota will reset at {reset_time.strftime('%Y-%m-%d %H:%M:%S UTC')}. "
+                    f"Sleeping for {wait_seconds / 3600:.1f} hours..."
                 )
+
                 await asyncio.sleep(wait_seconds)
-            else:
-                # If reset is in the past, X might be applying a daily cap
-                logging.warning(
-                    "Reset time is in the past. This often indicates a Daily Limit (50/day on Free tier)."
-                )
-                logging.warning("Sleeping for 30 minutes as backoff...")
-                await asyncio.sleep(1801)
-        elif retry_after:
-            wait_seconds = int(retry_after) + 5
-            logging.warning(
-                f"Rate limit hit (v2). Retry-After: {retry_after}s. Sleeping for {wait_seconds}s..."
-            )
-            await asyncio.sleep(wait_seconds)
-        else:
-            logging.warning(
-                "Rate limit hit (v2). No reset header. Sleeping for 15 minutes..."
-            )
-            await asyncio.sleep(901)
 
-        await self._recreate_v2_client()
+                await self._recreate_v2_client()
+
+                return
+
+            # Fallback to standard 15-minute limits
+
+            reset_at = headers.get("x-rate-limit-reset")
+
+            retry_after = headers.get("retry-after")
+
+            if reset_at:
+                reset_time = datetime.fromtimestamp(int(reset_at), tz=timezone.utc)
+
+                # Add a small buffer of 5 seconds
+
+                wait_seconds = (
+                    reset_time - datetime.now(timezone.utc)
+                ).total_seconds() + 5
+
+                if wait_seconds > 0:
+                    logging.warning(
+                        f"Rate limit hit (v2). Resets at {reset_time.strftime('%Y-%m-%d %H:%M:%S UTC')}. "
+                        f"Sleeping for {wait_seconds:.0f} seconds..."
+                    )
+
+                    await asyncio.sleep(wait_seconds)
+
+                else:
+                    # If reset is in the past, X might be applying a daily cap without explicit 24h headers
+
+                    logging.warning(
+                        "Reset time is in the past. This often indicates a Daily Limit."
+                    )
+
+                    logging.warning("Sleeping for 30 minutes as backoff...")
+
+                    await asyncio.sleep(1801)
+
+            elif retry_after:
+                wait_seconds = int(retry_after) + 5
+
+                logging.warning(
+                    f"Rate limit hit (v2). Retry-After: {retry_after}s. Sleeping for {wait_seconds}s..."
+                )
+
+                await asyncio.sleep(wait_seconds)
+
+            else:
+                logging.warning(
+                    "Rate limit hit (v2). No reset header. Sleeping for 15 minutes..."
+                )
+
+                await asyncio.sleep(901)
+
+            await self._recreate_v2_client()
 
     @retry(
         stop=stop_after_attempt(3),
