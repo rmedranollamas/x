@@ -113,7 +113,10 @@ class DatabaseManager:
             cursor = conn.cursor()
             data = [(uid, "PENDING") for uid in user_ids]
             cursor.executemany(
-                "INSERT OR IGNORE INTO blocked_users (user_id, status) VALUES (?, ?)",
+                """
+                INSERT INTO blocked_users (user_id, status) VALUES (?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET status = 'PENDING'
+                """,
                 data,
             )
 

@@ -2,6 +2,7 @@ import logging
 import asyncio
 import sqlite3
 import time
+import calendar
 from datetime import datetime, timezone
 from typing import Optional, TYPE_CHECKING, Union
 import tweepy
@@ -208,7 +209,7 @@ class InsightsAgent(BaseAgent):
             try:
                 ts_str = day_insight["timestamp"].split(".")[0]
                 struct_time = time.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
-                delta_seconds = time.time() - time.mktime(struct_time)
+                delta_seconds = time.time() - calendar.timegm(struct_time)
                 delta_days = delta_seconds / 86400 or 1
             except Exception:
                 delta_days = 1
@@ -226,5 +227,4 @@ class InsightsAgent(BaseAgent):
                 lines.append(f"Velocity:  {daily_velocity:.1f} (Downwards)")
 
         lines.append("=" * width + "\n")
-        return "\n".join(lines)
         return "\n".join(lines)

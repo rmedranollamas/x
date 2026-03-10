@@ -403,28 +403,26 @@ class XService:
             return []
 
         all_users = []
-        # Chunk IDs into groups of 100
-        for i in range(0, len(user_ids), 100):
+        i = 0
+        while i < len(user_ids):
             chunk = user_ids[i : i + 100]
             try:
                 response = await self.client.get_users(ids=chunk)
                 if response.data:
                     all_users.extend(response.data)
+                i += 100
             except tweepy.errors.TooManyRequests as e:
                 await self._handle_v2_rate_limit(e)
-                # Retry this specific chunk
-                remaining_users = await self.get_users_by_ids(user_ids[i:])
-                all_users.extend(remaining_users)
-                break
+                # i remains the same, so it retries this chunk
             except Exception as e:
                 if is_transient_error(e):
                     if "NoneType" in str(e):
                         await self._recreate_v2_client()
-                        remaining_users = await self.get_users_by_ids(user_ids[i:])
-                        all_users.extend(remaining_users)
-                        break
+                        # i remains the same, so it retries this chunk
+                        continue
                     raise
                 logging.warning(f"Error fetching users for chunk starting at {i}: {e}")
+                i += 100
         return all_users
 
     @retry(
@@ -484,24 +482,24 @@ class XService:
         Fetches a page of tweets for a given user ID using v2 API.
         Includes public metrics and creation date.
         """
-        try:
-            return await self.client.get_users_tweets(
-                id=user_id,
-                max_results=100,
-                pagination_token=pagination_token,
-                tweet_fields=["public_metrics", "created_at", "referenced_tweets"],
-                exclude=["retweets"],
-            )
-        except tweepy.errors.TooManyRequests as e:
-            await self._handle_v2_rate_limit(e)
-            return await self.get_user_tweets(user_id, pagination_token)
-        except Exception as e:
-            if is_transient_error(e):
-                if "NoneType" in str(e):
-                    await self._recreate_v2_client()
-                    return await self.get_user_tweets(user_id, pagination_token)
+        while True:
+            try:
+                return await self.client.get_users_tweets(
+                    id=user_id,
+                    max_results=100,
+                    pagination_token=pagination_token,
+                    tweet_fields=["public_metrics", "created_at", "referenced_tweets"],
+                    exclude=["retweets"],
+                )
+            except tweepy.errors.TooManyRequests as e:
+                await self._handle_v2_rate_limit(e)
+            except Exception as e:
+                if is_transient_error(e):
+                    if "NoneType" in str(e):
+                        await self._recreate_v2_client()
+                        continue
+                    raise
                 raise
-            raise
 
     @retry(
         stop=stop_after_attempt(3),
@@ -514,20 +512,19 @@ class XService:
         Deletes a tweet using v2 API.
         Returns True if successful, False otherwise.
         """
-        try:
-            response = await self.client.delete_tweet(id=tweet_id)
-            if response.data:
-                return response.data.get("deleted", False)
-            return False
-        except tweepy.errors.TooManyRequests as e:
-            await self._handle_v2_rate_limit(e)
-            # Recursion gives us a fresh set of tenacity attempts
-            return await self.delete_tweet(tweet_id)
-        except Exception as e:
-            if is_transient_error(e):
-                if "NoneType" in str(e):
-                    await self._recreate_v2_client()
-                    return await self.delete_tweet(tweet_id)
-                raise
-            logging.warning(f"Failed to delete tweet {tweet_id}: {e}")
-            return False
+        while True:
+            try:
+                response = await self.client.delete_tweet(id=tweet_id)
+                if response.data:
+                    return response.data.get("deleted", False)
+                return False
+            except tweepy.errors.TooManyRequests as e:
+                await self._handle_v2_rate_limit(e)
+            except Exception as e:
+                if is_transient_error(e):
+                    if "NoneType" in str(e):
+                        await self._recreate_v2_client()
+                        continue
+                    raise
+                logging.warning(f"Failed to delete tweet {tweet_id}: {e}")
+                return False
