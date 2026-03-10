@@ -83,6 +83,11 @@ The framework is designed to be extensible, allowing for the easy addition of ne
     uv run x-agent unfollow
     ```
 
+*   **Delete:** Removes old tweets based on age and engagement rules. Supports live API and X archive files.
+    ```bash
+    uv run x-agent delete [--archive tweets.js] [--protected-id ID] [--dry-run]
+    ```
+
 *   **Blocked IDs:** Lists all currently blocked user IDs.
     ```bash
     uv run x-agent blocked-ids
@@ -98,7 +103,7 @@ This will install a daily cronjob (default 9:00 AM) that runs the insights agent
 
 ### Global Options
 
-Use `--dry-run` to simulate actions without applying them (available for `unblock` and `unfollow`):
+Use `--dry-run` to simulate actions without applying them (available for `unblock`, `unfollow`, and `delete`):
 ```bash
 uv run x-agent unblock --dry-run
 ```
@@ -107,6 +112,37 @@ Use `--debug` with any command for detailed logging:
 ```bash
 uv run x-agent insights --debug
 ```
+
+### Database Management
+
+The framework includes utilities for managing the local SQLite state:
+
+*   **Info:** Show current environment and database path.
+    ```bash
+    uv run x-agent db info
+    ```
+
+*   **Backup:** Create a timestamped backup of the database in `.state/backups/`.
+    ```bash
+    uv run x-agent db backup
+    ```
+
+## Deletion Rules
+
+The `delete` agent uses a multi-tier rule system to decide what to keep:
+
+1.  **Grace Period:** Never deletes anything younger than 7 days.
+2.  **Protected Content:** Keeps pinned tweets, threads, and media.
+3.  **Engagement Thresholds:**
+    *   Older than 30 days: Deletes low-engagement retweets.
+    *   Older than 365 days: Deletes unless specifically protected.
+    *   In-between: Deletes if likes + retweets fall below a threshold (higher for top-level tweets than replies).
+
+## Architecture
+
+*   **Service Layer:** Robust wrapper around Tweepy that handles both v1.1 and v2 APIs with automated rate-limit recovery and retry logic.
+*   **Agent Layer:** Modular architecture where each task is encapsulated in its own agent.
+*   **Database Manager:** Centralized state management with SQLite, including an automated migration system for schema updates.
 
 For more information, use the `--help` flag:
 ```bash

@@ -31,8 +31,9 @@ Python CLI framework for X (Twitter) account management via modular agents.
 ## Development Conventions
 
 - Asynchronous first: all agents and services use `asyncio`.
-- Safe DB handling: use `transaction` context manager in `DatabaseManager`.
-- Fail-fast config: missing credentials or SMTP settings (when using `--email`) stop the app.
+- **Resilience:** Iterative rate-limit handling (no recursion), 24h daily limit detection, and UTC-safe analytics using `calendar.timegm`.
+- **Safe DB handling:** use `transaction` context manager in `DatabaseManager`. UPSERT logic for blocked IDs ensures state consistency on refreshes.
+- **Fail-fast config:** missing credentials or SMTP settings (when using `--email`) stop the app.
 - Environment-aware: `X_AGENT_ENV` toggles between dev and production databases.
 - Informative CLI output: Shows active environment and DB file on every run.
 - Code style: `ruff` formatted, type-hinted, verified with `ty`.
