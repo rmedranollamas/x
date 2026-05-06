@@ -12,6 +12,21 @@ if TYPE_CHECKING:
     from ..database import DatabaseManager
 
 
+class MockStatus:
+    """Mock a Tweepy Status object for _process_tweet"""
+
+    def __init__(self, data: dict, created_at: datetime):
+        self.id = int(data["id"])
+        self.created_at = created_at
+        self.favorite_count = int(data.get("favorite_count", 0))
+        self.retweet_count = int(data.get("retweet_count", 0))
+        self.in_reply_to_status_id = data.get("in_reply_to_status_id")
+        self.full_text = data.get("full_text", "")
+        self.text = self.full_text  # Robustness
+        self.entities = data.get("entities", {})
+        self.extended_entities = data.get("extended_entities", {})
+
+
 class DeleteAgent(BaseAgent):
     """
     An agent responsible for deleting old tweets based on specific rules.
@@ -108,20 +123,7 @@ class DeleteAgent(BaseAgent):
                     tweet_raw["created_at"], "%a %b %d %H:%M:%S %z %Y"
                 )
 
-                # Mock a Tweepy Status object for _process_tweet
-                class MockStatus:
-                    def __init__(self, data):
-                        self.id = int(data["id"])
-                        self.created_at = created_at
-                        self.favorite_count = int(data.get("favorite_count", 0))
-                        self.retweet_count = int(data.get("retweet_count", 0))
-                        self.in_reply_to_status_id = data.get("in_reply_to_status_id")
-                        self.full_text = data.get("full_text", "")
-                        self.text = self.full_text  # Robustness
-                        self.entities = data.get("entities", {})
-                        self.extended_entities = data.get("extended_entities", {})
-
-                tweet = MockStatus(tweet_raw)
+                tweet = MockStatus(tweet_raw, created_at)
                 await self._process_tweet(tweet, now)
 
         except Exception as e:
