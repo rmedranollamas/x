@@ -30,7 +30,6 @@ async def test_unblock_agent_dry_run(mock_x_service, mock_db_manager, caplog):
     # Setup DB to return some pending users
     mock_db_manager.get_all_blocked_users_count.return_value = 2
     mock_db_manager.get_pending_blocked_users.return_value = [101, 102]
-    mock_db_manager.get_processed_users_count.return_value = 0
 
     agent = UnblockAgent(
         x_service=mock_x_service, db_manager=mock_db_manager, dry_run=True
