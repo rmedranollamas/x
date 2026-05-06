@@ -65,7 +65,6 @@ async def test_execute_empty_db_fetches_from_api(
 
     # DB returns pending users after insert
     mock_db_manager.get_pending_blocked_users.return_value = [1, 2, 3]
-    mock_db_manager.get_processed_users_count.return_value = 0
 
     # Mock unblock responses
     mock_x_service.unblock_user.side_effect = ["SUCCESS", "SUCCESS", "SUCCESS"]
@@ -89,7 +88,6 @@ async def test_execute_resumes_from_db(unblock_agent, mock_x_service, mock_db_ma
     mock_db_manager.get_all_blocked_users_count.return_value = 5
     # Pending are 3, 4, 5
     mock_db_manager.get_pending_blocked_users.return_value = [3, 4, 5]
-    mock_db_manager.get_processed_users_count.return_value = 2
 
     mock_x_service.unblock_user.side_effect = ["SUCCESS", "SUCCESS", "SUCCESS"]
 
@@ -119,7 +117,6 @@ async def test_execute_handles_not_found_and_errors(
     """Test execute handles NOT_FOUND and failure cases."""
     mock_db_manager.get_all_blocked_users_count.return_value = 3
     mock_db_manager.get_pending_blocked_users.return_value = [1, 2, 3]
-    mock_db_manager.get_processed_users_count.return_value = 0
 
     mock_x_service.unblock_user.side_effect = [
         "SUCCESS",  # User 1

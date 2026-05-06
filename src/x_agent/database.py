@@ -137,15 +137,6 @@ class DatabaseManager:
             cursor.execute("SELECT COUNT(*) FROM blocked_users")
             return cursor.fetchone()[0]
 
-    def get_processed_users_count(self) -> int:
-        """Returns the number of users that have been processed (not PENDING)."""
-        with self.transaction() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT COUNT(*) FROM blocked_users WHERE status != 'PENDING'"
-            )
-            return cursor.fetchone()[0]
-
     def clear_pending_blocked_users(self) -> None:
         """Deletes all users with status 'PENDING' from blocked_users table."""
         with self.transaction() as conn:

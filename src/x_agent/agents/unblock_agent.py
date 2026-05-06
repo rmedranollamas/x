@@ -107,11 +107,8 @@ class UnblockAgent(BaseAgent):
                     return
 
         pending_ids = await asyncio.to_thread(self.db.get_pending_blocked_users)
-        processed_count = await asyncio.to_thread(self.db.get_processed_users_count)
 
-        logging.info(
-            f"Already processed: {processed_count}. Remaining to unblock: {len(pending_ids)}."
-        )
+        logging.info(f"Remaining accounts to unblock: {len(pending_ids)}.")
 
         if not pending_ids:
             logging.info(
