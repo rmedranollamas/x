@@ -23,6 +23,9 @@ def mock_async_client():
     client.get_me = AsyncMock(
         return_value=MagicMock(data=MagicMock(id=12345, username="testuser"))
     )
+    client.get_user = AsyncMock()
+    client.unblock = AsyncMock()
+    client.block = AsyncMock()
     client.request = AsyncMock()
     # Mocking session for close()
     client.session = MagicMock()
@@ -114,15 +117,13 @@ async def test_unblock_user_zombie_fixed_v2(x_service, mock_api_v1, mock_async_c
     mock_api_v1.destroy_block.side_effect = [
         tweepy.errors.NotFound(MagicMock()),  # Initial try
     ]
-    mock_api_v1.get_user.return_value = MagicMock()  # User exists
-    mock_async_client.request.return_value = MagicMock()  # V2 success
+    mock_async_client.get_user.return_value = MagicMock(data=MagicMock())  # User exists
+    mock_async_client.unblock.return_value = MagicMock()  # V2 success
 
     result = await x_service.unblock_user(999)
 
     assert result == "SUCCESS"
-    mock_async_client.request.assert_awaited_once_with(
-        "DELETE", "/2/users/12345/blocking/999", params={}, user_auth=True
-    )
+    mock_async_client.unblock.assert_awaited_once_with(id=12345, target_user_id=999)
 
 
 @pytest.mark.asyncio
@@ -135,8 +136,8 @@ async def test_unblock_user_zombie_fixed_toggle(
         tweepy.errors.NotFound(MagicMock()),  # Initial try
         MagicMock(),  # Destroy block in toggle success
     ]
-    mock_api_v1.get_user.return_value = MagicMock()  # User exists
-    mock_async_client.request.side_effect = tweepy.errors.NotFound(
+    mock_async_client.get_user.return_value = MagicMock(data=MagicMock())  # User exists
+    mock_async_client.unblock.side_effect = tweepy.errors.NotFound(
         MagicMock()
     )  # V2 fail
     mock_api_v1.create_block.return_value = MagicMock()  # Toggle success
@@ -144,10 +145,30 @@ async def test_unblock_user_zombie_fixed_toggle(
     result = await x_service.unblock_user(999)
 
     assert result == "SUCCESS"
-    mock_async_client.request.assert_awaited_once_with(
-        "DELETE", "/2/users/12345/blocking/999", params={}, user_auth=True
-    )
+    mock_async_client.unblock.assert_awaited_with(id=12345, target_user_id=999)
     mock_api_v1.create_block.assert_called_once_with(user_id=999)
+
+
+@pytest.mark.asyncio
+async def test_unblock_user_zombie_v2_toggle(x_service, mock_api_v1, mock_async_client):
+    """Test unblock_user handles Zombie Block using V2 Toggle fix."""
+    x_service.user_id = 12345
+    mock_api_v1.destroy_block.side_effect = [
+        tweepy.errors.NotFound(MagicMock()),  # Initial try
+    ]
+    mock_async_client.get_user.return_value = MagicMock(data=MagicMock())  # User exists
+    mock_async_client.unblock.side_effect = [
+        tweepy.errors.NotFound(MagicMock()),  # Strategy 1 fail
+        MagicMock(),  # Strategy 3 unblock success
+    ]
+    mock_api_v1.create_block.side_effect = Exception("V1 fail")  # Strategy 2 fail
+    mock_async_client.block.return_value = MagicMock()  # Strategy 3 block success
+
+    result = await x_service.unblock_user(999)
+
+    assert result == "SUCCESS"
+    assert mock_async_client.unblock.await_count == 2
+    mock_async_client.block.assert_awaited_once_with(id=12345, target_user_id=999)
 
 
 @pytest.mark.asyncio
@@ -159,10 +180,10 @@ async def test_unblock_user_zombie_v2_json_error(
     mock_api_v1.destroy_block.side_effect = [
         tweepy.errors.NotFound(MagicMock()),  # Initial try
     ]
-    mock_api_v1.get_user.return_value = MagicMock()  # User exists
+    mock_async_client.get_user.return_value = MagicMock(data=MagicMock())  # User exists
 
     # Simulate the specific JSON decode error from Tweepy/simplejson
-    mock_async_client.request.side_effect = Exception(
+    mock_async_client.unblock.side_effect = Exception(
         "Attempt to decode JSON with unexpected mimetype: text/html;charset=utf-8"
     )
 
@@ -177,8 +198,47 @@ async def test_unblock_user_zombie_v2_json_error(
 
     # It succeeds because Strategy 2 works
     assert result == "SUCCESS"
-    mock_async_client.request.assert_awaited_once()
+    mock_async_client.unblock.assert_awaited_once()
     mock_api_v1.create_block.assert_called_once_with(user_id=999)
+
+
+@pytest.mark.asyncio
+async def test_user_exists_v2_success(x_service, mock_async_client):
+    """Test _user_exists returns True if V2 finds user."""
+    mock_async_client.get_user.return_value = MagicMock(data=MagicMock())
+    assert await x_service._user_exists(999) is True
+
+
+@pytest.mark.asyncio
+async def test_user_exists_v2_not_found_error(x_service, mock_async_client):
+    """Test _user_exists returns False if V2 returns 'Could not find user' error."""
+    mock_async_client.get_user.return_value = MagicMock(
+        data=None, errors=[{"detail": "Could not find user with id [999]."}]
+    )
+    assert await x_service._user_exists(999) is False
+
+
+@pytest.mark.asyncio
+async def test_user_exists_v2_exception_v1_fallback(
+    x_service, mock_async_client, mock_api_v1
+):
+    """Test _user_exists falls back to V1 if V2 raises exception."""
+    mock_async_client.get_user.side_effect = Exception("API Down")
+    mock_api_v1.get_user.return_value = MagicMock()
+    assert await x_service._user_exists(999) is True
+    mock_api_v1.get_user.assert_called_once_with(user_id=999)
+
+
+@pytest.mark.asyncio
+async def test_unblock_user_existence_check_failed(x_service, mock_api_v1, mock_async_client):
+    """Test unblock_user returns FAILED if existence check fails."""
+    mock_api_v1.destroy_block.side_effect = tweepy.errors.NotFound(MagicMock())
+    mock_async_client.get_user.side_effect = Exception("V2 Down")
+    mock_api_v1.get_user.side_effect = Exception("V1 Down")
+
+    result = await x_service.unblock_user(999)
+
+    assert result == "FAILED"
 
 
 @pytest.mark.asyncio

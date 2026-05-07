@@ -158,23 +158,38 @@ class XService:
             logging.warning(f"Error checking existence of user {user_id}: {e}")
             return None
 
+    async def _user_exists(self, user_id: int) -> bool | None:
+        """Checks if a user exists and is active using v2 API with v1 fallback."""
+        try:
+            response = await self.client.get_user(id=user_id)
+            if response and response.data:
+                return True
+            # V2 can return success but with errors for specific IDs
+            if response and response.errors:
+                for error in response.errors:
+                    if "Could not find user with id" in error.get("detail", ""):
+                        return False
+            return False
+        except tweepy.errors.NotFound:
+            return False
+        except Exception as e:
+            logging.debug(
+                f"V2 existence check failed for {user_id}: {e}. Falling back to V1."
+            )
+            return await self._check_user_exists_v1(user_id)
+
     async def _handle_zombie_recovery(self, user_id: int) -> str:
         """
         Attempts to fix a 'Zombie Block'.
         """
-        logging.warning(
+        logging.info(
             f"User ID {user_id} EXISTS. Attempting recovery strategies (Zombie Fix)..."
         )
 
         # Strategy 1: V2 Unblock
         try:
             await self.ensure_initialized()
-            await self.client.request(
-                "DELETE",
-                f"/2/users/{self.user_id}/blocking/{user_id}",
-                params={},
-                user_auth=True,
-            )
+            await self.client.unblock(id=self.user_id, target_user_id=user_id)
             return "SUCCESS"
         except tweepy.errors.NotFound as e:
             logging.warning(
@@ -188,14 +203,23 @@ class XService:
             else:
                 logging.warning(f"V2 Unblock failed for {user_id}: {e}")
 
-        # Strategy 2: Toggle Block Fix
+        # Strategy 2: V1 Toggle Block Fix
         try:
             async with self.v1_lock:
                 await asyncio.to_thread(self.api_v1.create_block, user_id=user_id)
                 await asyncio.to_thread(self.api_v1.destroy_block, user_id=user_id)
             return "SUCCESS"
         except Exception as e:
-            logging.warning(f"Toggle Block Fix failed for {user_id}: {e}")
+            logging.warning(f"V1 Toggle Block Fix failed for {user_id}: {e}")
+
+        # Strategy 3: V2 Toggle Block Fix
+        try:
+            await self.ensure_initialized()
+            await self.client.block(id=self.user_id, target_user_id=user_id)
+            await self.client.unblock(id=self.user_id, target_user_id=user_id)
+            return "SUCCESS"
+        except Exception as e:
+            logging.warning(f"V2 Toggle Block Fix failed for {user_id}: {e}")
 
         logging.warning(
             f"All recovery strategies failed for {user_id} (True Zombie Block). Skipping to avoid infinite retries."
@@ -218,23 +242,21 @@ class XService:
                 await asyncio.to_thread(self.api_v1.destroy_block, user_id=user_id)
             return "SUCCESS"
         except tweepy.errors.NotFound as e:
-            # Not found is not transient, so we handle it immediately
-            logging.warning(
-                f"User ID {user_id} not found (404) on V1. API says: {e}. Checking if user exists..."
+            # They might exist but the block relationship is glitched
+            logging.debug(
+                f"User {user_id} unblock failed with NotFound. Checking if user exists..."
             )
-            exists = await self._check_user_exists_v1(user_id)
-            if exists is True:
-                return await self._handle_zombie_recovery(user_id)
-            elif exists is False:
-                logging.warning(
-                    f"User ID {user_id} confirmed missing. Skipping (Ghost Block)."
-                )
+            exists = await self._user_exists(user_id)
+            if exists is False:
+                logging.debug(f"User {user_id} does not exist. Ignoring NotFound.")
                 return "NOT_FOUND"
-            else:  # exists is None
+            elif exists is None:
                 logging.warning(
                     f"Could not verify existence of {user_id}. Returning FAILED to retry later."
                 )
                 return "FAILED"
+
+            return await self._handle_zombie_recovery(user_id)
         except Exception as e:
             if is_transient_error(e):
                 raise  # Reraise to let tenacity handle it
