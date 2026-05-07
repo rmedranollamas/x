@@ -70,6 +70,24 @@ class InitialSchema(Migration):
     def _ensure_column(
         self, cursor: sqlite3.Cursor, table: str, column: str, definition: str
     ):
+        # Security: Validate inputs against allowlist to prevent SQL injection
+        allowed_tables = {
+            "insights",
+            "blocked_users",
+            "following_users",
+            "followers",
+            "unfollows",
+        }
+        allowed_columns = {"tweet_count", "status", "updated_at"}
+        allowed_definitions = {"INTEGER DEFAULT 0", "TEXT DEFAULT 'PENDING'", "DATETIME"}
+
+        if table not in allowed_tables:
+            raise ValueError(f"Unauthorized table: {table}")
+        if column not in allowed_columns:
+            raise ValueError(f"Unauthorized column: {column}")
+        if definition not in allowed_definitions:
+            raise ValueError(f"Unauthorized definition: {definition}")
+
         cursor.execute(f"PRAGMA table_info({table})")
         columns = [row[1] for row in cursor.fetchall()]
         if column not in columns:
