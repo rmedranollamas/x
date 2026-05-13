@@ -208,18 +208,6 @@ class DatabaseManager:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM following_users WHERE status = 'PENDING'")
 
-    def update_following_status(self, user_ids: List[int], status: str) -> None:
-        """Batch updates the status of multiple following users."""
-        if not user_ids:
-            return
-        with self.transaction() as conn:
-            cursor = conn.cursor()
-            data = [(status, uid) for uid in user_ids]
-            cursor.executemany(
-                "UPDATE following_users SET status = ?, updated_at = (STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW')) WHERE user_id = ?",
-                data,
-            )
-
     def get_all_follower_ids(self) -> set[int]:
         """Retrieves all user IDs from the followers table."""
         with self.transaction() as conn:
