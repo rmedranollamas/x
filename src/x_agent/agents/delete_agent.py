@@ -67,6 +67,7 @@ class DeleteAgent(BaseAgent):
         self.protected_ids = set(protected_ids or [])
         self.archive_path = Path(archive_path) if archive_path else None
         self.stats = {"deleted": 0, "skipped": 0, "errors": 0}
+        self.deleted_tweet_ids = set()
 
     async def execute(self) -> str:
         """
@@ -75,6 +76,10 @@ class DeleteAgent(BaseAgent):
         logging.info("--- X Delete Agent ---")
         await self.x_service.ensure_initialized()
         await asyncio.to_thread(self.db.initialize_database)
+
+        # Load already deleted IDs to optimize processing (Batch fetch)
+        self.deleted_tweet_ids = await asyncio.to_thread(self.db.get_all_deleted_tweet_ids)
+        logging.info(f"Loaded {len(self.deleted_tweet_ids)} already deleted tweet IDs.")
 
         if self.dry_run:
             logging.info("DRY RUN ENABLED: No tweets will be actually deleted.")
@@ -163,8 +168,8 @@ class DeleteAgent(BaseAgent):
         """Applies the rules to a single tweet (Status object) and deletes if necessary."""
         tweet_id = tweet.id
 
-        # Skip if already deleted (checkpointing)
-        if await asyncio.to_thread(self.db.is_tweet_deleted, tweet_id):
+        # Skip if already deleted (checkpointing) - Using local cache to avoid N+1 query
+        if tweet_id in self.deleted_tweet_ids:
             logging.debug(f"Skipping already deleted tweet: {tweet_id}")
             self.stats["deleted"] += 1  # Count as deleted for progress tracking
             return
@@ -269,6 +274,7 @@ class DeleteAgent(BaseAgent):
             success = await self.x_service.delete_tweet(tweet_id)
             if success:
                 self.stats["deleted"] += 1
+                self.deleted_tweet_ids.add(tweet_id)
                 await asyncio.to_thread(
                     self.db.log_deleted_tweet,
                     tweet_id,

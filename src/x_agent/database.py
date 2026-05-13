@@ -279,3 +279,11 @@ class DatabaseManager:
                 "SELECT 1 FROM deleted_tweets WHERE tweet_id = ?", (tweet_id,)
             )
             return cursor.fetchone() is not None
+
+    def get_all_deleted_tweet_ids(self) -> set[int]:
+        """Retrieves all deleted tweet IDs from the deleted_tweets table."""
+        with self.transaction() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT tweet_id FROM deleted_tweets")
+            rows = cursor.fetchall()
+            return {row["tweet_id"] for row in rows}
