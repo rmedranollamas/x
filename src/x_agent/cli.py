@@ -151,11 +151,20 @@ def unfollow(
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Simulate actions without making changes."
     ),
+    email: bool = typer.Option(
+        False, "--email", help="Send the report via email after generation."
+    ),
 ):
     """
     Run the unfollow agent to detect who has unfollowed you.
     """
-    _run_agent(UnfollowAgent, debug, dry_run=dry_run)
+    try:
+        asyncio.run(
+            _execute_agent(UnfollowAgent, debug, email=email, dry_run=dry_run)
+        )
+    except Exception as e:
+        logging.error(f"An unexpected error occurred: {e}", exc_info=True)
+        sys.exit(1)
 
 
 @app.command()

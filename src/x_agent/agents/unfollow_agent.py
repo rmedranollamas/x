@@ -33,7 +33,7 @@ class UnfollowAgent(BaseAgent):
         self.x_service = x_service
         self.dry_run = dry_run
 
-    async def execute(self) -> None:
+    async def execute(self) -> str | None:
         """
         Executes the unfollow detection logic.
         1) Gets current follower list from the API.
@@ -72,7 +72,7 @@ class UnfollowAgent(BaseAgent):
             await asyncio.to_thread(self.db.replace_followers, current_followers)
 
         # 4) Show stats and store unfollow events
-        self._report_stats(len(current_followers), unfollowed_ids, new_followers_count)
+        report = await self._report_stats(len(current_followers), unfollowed_ids, new_followers_count)
 
         if unfollowed_ids:
             if self.dry_run:
@@ -84,19 +84,34 @@ class UnfollowAgent(BaseAgent):
                 await asyncio.to_thread(self.db.log_unfollows, list(unfollowed_ids))
 
         logging.info("Unfollow detection completed.")
+        return report
 
-    def _report_stats(
+    async def _report_stats(
         self, current_total: int, unfollowed_ids: set[int], new_followers_count: int
-    ) -> None:
-        """Reports the findings to the console."""
-        print("\n--- Unfollow Detection Report ---")
-        print(f"Total Followers: {current_total}")
-        print(f"New Followers:   {new_followers_count}")
-        print(f"Unfollows:       {len(unfollowed_ids)}")
+    ) -> str:
+        """Reports the findings to the console and returns the report."""
+        lines = []
+        lines.append("\n--- Unfollow Detection Report ---")
+        lines.append(f"Total Followers: {current_total}")
+        lines.append(f"New Followers:   {new_followers_count}")
+        lines.append(f"Unfollows:       {len(unfollowed_ids)}")
 
         if unfollowed_ids:
-            print("\nIDs that unfollowed you:")
-            for uid in sorted(unfollowed_ids):
-                print(f" - {uid}")
+            lines.append("\nAccounts that unfollowed you:")
 
-        print("---------------------------------\n")
+            # Resolve handles
+            unfollowed_users = await self.x_service.get_users_by_ids(list(unfollowed_ids))
+            user_map = {u.id: u.username for u in unfollowed_users}
+
+            for uid in sorted(unfollowed_ids):
+                handle = user_map.get(uid)
+                if handle:
+                    lines.append(f" - @{handle} (ID: {uid})")
+                else:
+                    lines.append(f" - {uid}")
+
+        lines.append("---------------------------------\n")
+
+        report_text = "\n".join(lines)
+        print(report_text)
+        return report_text
