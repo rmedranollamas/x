@@ -100,9 +100,10 @@ async def test_unblock_user_success(x_service, mock_api_v1):
 
 
 @pytest.mark.asyncio
-async def test_unblock_user_not_found(x_service, mock_api_v1):
+async def test_unblock_user_not_found(x_service, mock_api_v1, mock_async_client):
     """Test unblock_user returns NOT_FOUND on 404 if user doesn't exist."""
     mock_api_v1.destroy_block.side_effect = tweepy.errors.NotFound(MagicMock())
+    mock_async_client.get_user.side_effect = tweepy.errors.NotFound(MagicMock())
     mock_api_v1.get_user.side_effect = tweepy.errors.NotFound(MagicMock())
 
     result = await x_service.unblock_user(999)
