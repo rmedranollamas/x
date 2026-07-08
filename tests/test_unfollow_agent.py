@@ -71,7 +71,7 @@ async def test_execute_report_handles(unfollow_agent, mock_x_service, mock_db_ma
     mock_db_manager.get_all_follower_ids.return_value = {101, 102}
 
     user101 = MagicMock(spec=tweepy.User)
-    user101.id = 101
+    user101.id = "101"  # API v2 often returns IDs as strings
     user101.username = "unfollowed_user"
 
     mock_x_service.get_users_by_ids.return_value = [user101]
