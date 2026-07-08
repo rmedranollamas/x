@@ -11,7 +11,7 @@ dependencies = [
     "pydantic-settings>=2.14.2",
     "tenacity>=9.1.2",
     "tweepy",
-    "typer>=0.26.7",
+    "typer>=0.26.8",
 ]
 
 [project.scripts]
@@ -24,7 +24,7 @@ where = ["src"]
 package = true
 
 [build-system]
-requires = ["setuptools>=82.0.1"]
+requires = ["setuptools>=83.0.0"]
 build-backend = "setuptools.build_meta"
 
 [dependency-groups]
