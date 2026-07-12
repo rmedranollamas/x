@@ -54,7 +54,7 @@ class XService:
             settings.x_access_token,
             settings.x_access_token_secret,
         )
-        self.api_v1 = tweepy.API(auth, wait_on_rate_limit=True)
+        self.api_v1 = tweepy.API(auth, wait_on_rate_limit=False)
         self.user_id: int | None = None
         self.pinned_tweet_id: int | None = None
         self.v1_lock = asyncio.Lock()
