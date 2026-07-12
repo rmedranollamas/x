@@ -251,8 +251,10 @@ class TestProcessLiveAPI:
     @pytest.mark.asyncio
     async def test_process_live_api_unauthorized(self, delete_agent, caplog):
         """Test _process_live_api with unauthorized error."""
+        mock_response = MagicMock()
+        mock_response.status_code = 401
         delete_agent.x_service.get_user_tweets_v1 = AsyncMock(
-            side_effect=tweepy.errors.Unauthorized("Rate limited")
+            side_effect=tweepy.errors.Unauthorized(mock_response)
         )
         
         now = datetime.now(timezone.utc)
@@ -357,7 +359,7 @@ class TestProcessTweet:
         
         delete_agent._delete_tweet.assert_called_once()
         call_args = delete_agent._delete_tweet.call_args
-        assert "old retweet" in call_args[0][2]  # reason parameter
+        assert "old retweet" in call_args[0][3]  # reason parameter
 
     @pytest.mark.asyncio
     async def test_process_tweet_thread(self, delete_agent, caplog):
@@ -421,7 +423,7 @@ class TestProcessTweet:
         
         delete_agent._delete_tweet.assert_called_once()
         call_args = delete_agent._delete_tweet.call_args
-        assert "older than 365 days" in call_args[0][2]  # reason parameter
+        assert "older than 365 days" in call_args[0][3]  # reason parameter
 
     @pytest.mark.asyncio
     async def test_process_tweet_popular(self, delete_agent, caplog):
@@ -485,7 +487,7 @@ class TestProcessTweet:
         
         delete_agent._delete_tweet.assert_called_once()
         call_args = delete_agent._delete_tweet.call_args
-        assert "low engagement" in call_args[0][2]  # reason parameter
+        assert "low engagement" in call_args[0][3]  # reason parameter
 
 
 class TestDeleteTweet:

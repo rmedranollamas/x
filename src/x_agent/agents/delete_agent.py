@@ -156,11 +156,15 @@ class DeleteAgent(BaseAgent):
             if not tweets:
                 break
 
+            prev_max_id = max_id
             for tweet in tweets:
                 if max_id and tweet.id == max_id:
                     continue
                 await self._process_tweet(tweet, now)
                 max_id = tweet.id
+
+            if max_id == prev_max_id:
+                break
 
             await asyncio.sleep(1)
 

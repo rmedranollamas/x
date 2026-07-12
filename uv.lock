@@ -864,7 +864,7 @@ dependencies = [
     { name = "typer" },
 ]
 
-[package.dev-dependencies]
+[package.optional-dependencies]
 dev = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -878,18 +878,15 @@ requires-dist = [
     { name = "aiosmtplib", specifier = ">=5.1.2" },
     { name = "async-lru", specifier = ">=2.0.5" },
     { name = "pydantic-settings", specifier = ">=2.14.2" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.1.1" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=1.4.0" },
+    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=7.0.0" },
+    { name = "pytest-mock", marker = "extra == 'dev'", specifier = ">=3.15.1" },
     { name = "tenacity", specifier = ">=9.1.2" },
     { name = "tweepy" },
     { name = "typer", specifier = ">=0.26.8" },
 ]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "pytest", specifier = ">=9.1.1" },
-    { name = "pytest-asyncio", specifier = ">=1.4.0" },
-    { name = "pytest-cov", specifier = ">=7.0.0" },
-    { name = "pytest-mock", specifier = ">=3.15.1" },
-]
+provides-extras = ["dev"]
 
 [[package]]
 name = "yarl"
