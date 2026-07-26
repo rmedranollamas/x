@@ -65,6 +65,8 @@ class InsightsAgent(BaseAgent):
 
         new_follower_users = []
         lost_follower_users = []
+        new_ids = []
+        lost_ids = []
 
         if previous_follower_ids:
             new_ids = list(current_follower_ids - previous_follower_ids)
@@ -99,6 +101,8 @@ class InsightsAgent(BaseAgent):
             comparisons,
             new_follower_users,
             lost_follower_users,
+            new_ids,
+            lost_ids,
         )
 
         # Print to stdout as before
@@ -126,6 +130,8 @@ class InsightsAgent(BaseAgent):
         comparisons: dict[str, Optional[sqlite3.Row]],
         new_followers: list[tweepy.User],
         lost_followers: list[tweepy.User],
+        new_ids: list[int],
+        lost_ids: list[int],
     ) -> str:
         """
         Generates a comprehensive report optimized for narrow screens.
@@ -146,16 +152,28 @@ class InsightsAgent(BaseAgent):
         lines.append("-" * width)
 
         # 2. Follower Changes
-        if new_followers or lost_followers:
+        if new_ids or lost_ids:
             lines.append("           FOLLOWERS LOG")
-            if new_followers:
-                lines.append(f"New ({len(new_followers)}):")
-                for u in new_followers:
-                    lines.append(f" + @{u.username}")
-            if lost_followers:
-                lines.append(f"Lost ({len(lost_followers)}):")
-                for u in lost_followers:
-                    lines.append(f" - @{u.username}")
+
+            new_user_map = {int(u.id): u.username for u in new_followers}
+            lost_user_map = {int(u.id): u.username for u in lost_followers}
+
+            if new_ids:
+                lines.append(f"New ({len(new_ids)}):")
+                for uid in sorted(new_ids):
+                    handle = new_user_map.get(int(uid))
+                    if handle:
+                        lines.append(f" + @{handle}")
+                    else:
+                        lines.append(f" + ID: {uid}")
+            if lost_ids:
+                lines.append(f"Lost ({len(lost_ids)}):")
+                for uid in sorted(lost_ids):
+                    handle = lost_user_map.get(int(uid))
+                    if handle:
+                        lines.append(f" - @{handle}")
+                    else:
+                        lines.append(f" - ID: {uid}")
             lines.append("-" * width)
 
         # 3. Account Vitality

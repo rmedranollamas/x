@@ -84,10 +84,13 @@ async def test_execute_with_follower_changes(
 
     # Mock user resolution
     user4 = MagicMock(spec=tweepy.User)
+    user4.id = 4
     user4.username = "new_user4"
     user5 = MagicMock(spec=tweepy.User)
+    user5.id = 5
     user5.username = "new_user5"
     user3 = MagicMock(spec=tweepy.User)
+    user3.id = 3
     user3.username = "lost_user3"
 
     async def mock_get_users(ids):
