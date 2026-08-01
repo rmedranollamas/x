@@ -68,6 +68,9 @@ class InsightsAgent(BaseAgent):
         new_ids = []
         lost_ids = []
 
+        new_user_map: dict[int, str] = {}
+        lost_user_map: dict[int, str] = {}
+
         if previous_follower_ids:
             new_ids = list(current_follower_ids - previous_follower_ids)
             lost_ids = list(previous_follower_ids - current_follower_ids)
@@ -75,10 +78,18 @@ class InsightsAgent(BaseAgent):
             if new_ids:
                 logging.info(f"Resolving {len(new_ids)} new follower usernames...")
                 new_follower_users = await self.x_service.get_users_by_ids(new_ids)
+                new_user_map = {int(u.id): u.username for u in new_follower_users}
+                for uid in new_ids:
+                    if uid not in new_user_map:
+                        new_user_map[uid] = await self.x_service.resolve_user_fallback(uid)
 
             if lost_ids:
                 logging.info(f"Resolving {len(lost_ids)} lost follower usernames...")
                 lost_follower_users = await self.x_service.get_users_by_ids(lost_ids)
+                lost_user_map = {int(u.id): u.username for u in lost_follower_users}
+                for uid in lost_ids:
+                    if uid not in lost_user_map:
+                        lost_user_map[uid] = await self.x_service.resolve_user_fallback(uid)
 
         # Update follower list in DB
         await asyncio.to_thread(self.db.replace_followers, current_follower_ids)
@@ -99,8 +110,8 @@ class InsightsAgent(BaseAgent):
             current_listed_count,
             created_at,
             comparisons,
-            new_follower_users,
-            lost_follower_users,
+            new_user_map,
+            lost_user_map,
             new_ids,
             lost_ids,
         )
@@ -128,8 +139,8 @@ class InsightsAgent(BaseAgent):
         current_listed: int,
         created_at: Optional[Union[datetime, time.struct_time]],
         comparisons: dict[str, Optional[sqlite3.Row]],
-        new_followers: list[tweepy.User],
-        lost_followers: list[tweepy.User],
+        new_user_map: dict[int, str],
+        lost_user_map: dict[int, str],
         new_ids: list[int],
         lost_ids: list[int],
     ) -> str:
@@ -155,15 +166,15 @@ class InsightsAgent(BaseAgent):
         if new_ids or lost_ids:
             lines.append("           FOLLOWERS LOG")
 
-            new_user_map = {int(u.id): u.username for u in new_followers}
-            lost_user_map = {int(u.id): u.username for u in lost_followers}
-
             if new_ids:
                 lines.append(f"New ({len(new_ids)}):")
                 for uid in sorted(new_ids):
                     handle = new_user_map.get(int(uid))
                     if handle:
-                        lines.append(f" + @{handle}")
+                        if handle.startswith("("):
+                            lines.append(f" + ID: {uid} {handle}")
+                        else:
+                            lines.append(f" + @{handle}")
                     else:
                         lines.append(f" + ID: {uid}")
             if lost_ids:
@@ -171,7 +182,10 @@ class InsightsAgent(BaseAgent):
                 for uid in sorted(lost_ids):
                     handle = lost_user_map.get(int(uid))
                     if handle:
-                        lines.append(f" - @{handle}")
+                        if handle.startswith("("):
+                            lines.append(f" - ID: {uid} {handle}")
+                        else:
+                            lines.append(f" - @{handle}")
                     else:
                         lines.append(f" - ID: {uid}")
             lines.append("-" * width)

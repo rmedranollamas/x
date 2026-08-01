@@ -103,10 +103,17 @@ class UnfollowAgent(BaseAgent):
             unfollowed_users = await self.x_service.get_users_by_ids(list(unfollowed_ids))
             user_map = {int(u.id): u.username for u in unfollowed_users}
 
+            for uid in unfollowed_ids:
+                if uid not in user_map:
+                    user_map[uid] = await self.x_service.resolve_user_fallback(uid)
+
             for uid in sorted(unfollowed_ids):
                 handle = user_map.get(int(uid))
                 if handle:
-                    lines.append(f" - @{handle} (ID: {uid})")
+                    if handle.startswith("("):
+                        lines.append(f" - ID: {uid} {handle}")
+                    else:
+                        lines.append(f" - @{handle} (ID: {uid})")
                 else:
                     lines.append(f" - {uid}")
 
