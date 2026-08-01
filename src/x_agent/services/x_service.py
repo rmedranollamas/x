@@ -416,6 +416,28 @@ class XService:
         retry=retry_if_exception(is_transient_error),
         reraise=True,
     )
+    async def resolve_user_fallback(self, user_id: int) -> str:
+        """Attempts to resolve a user's screen name via V1 API, or returns their status."""
+        try:
+            async with self.v1_lock:
+                user = await asyncio.to_thread(self.api_v1.get_user, user_id=user_id)
+                return user.screen_name
+        except tweepy.errors.NotFound:
+            return "(Deactivated)"
+        except tweepy.errors.Forbidden:
+            return "(Suspended)"
+        except Exception as e:
+            if is_transient_error(e):
+                raise
+            logging.warning(f"Fallback resolution failed for {user_id}: {e}")
+            return "(Unknown)"
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception(is_transient_error),
+        reraise=True,
+    )
     async def get_users_by_ids(self, user_ids: list[int]) -> list[tweepy.User]:
         """
         Resolves a list of user IDs to user objects using the v2 API.
