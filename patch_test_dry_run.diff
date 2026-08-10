@@ -1,0 +1,9 @@
+--- tests/test_dry_run.py
++++ tests/test_dry_run.py
+@@ -14,6 +14,8 @@
+     service.get_follower_user_ids = AsyncMock(return_value={201, 202})
+     service.unblock_user = AsyncMock(return_value="SUCCESS")
+     service.unfollow_user = AsyncMock(return_value="SUCCESS")
++    service.get_users_by_ids = AsyncMock(return_value=[])
++    service.resolve_user_fallback = AsyncMock(return_value="fallback_user")
+     return service

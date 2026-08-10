@@ -11,6 +11,7 @@ def mock_x_service():
     service.ensure_initialized = AsyncMock()
     service.get_follower_user_ids = AsyncMock()
     service.get_users_by_ids = AsyncMock(return_value=[])
+    service.resolve_user_fallback = AsyncMock(return_value="fallback_user")
     return service
 
 
