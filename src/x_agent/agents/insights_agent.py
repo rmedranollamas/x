@@ -79,17 +79,27 @@ class InsightsAgent(BaseAgent):
                 logging.info(f"Resolving {len(new_ids)} new follower usernames...")
                 new_follower_users = await self.x_service.get_users_by_ids(new_ids)
                 new_user_map = {int(u.id): u.username for u in new_follower_users}
-                for uid in new_ids:
-                    if uid not in new_user_map:
-                        new_user_map[uid] = await self.x_service.resolve_user_fallback(uid)
+
+                missing_new_ids = [uid for uid in new_ids if uid not in new_user_map]
+                if missing_new_ids:
+                    missing_results = await asyncio.gather(
+                        *(self.x_service.resolve_user_fallback(uid) for uid in missing_new_ids)
+                    )
+                    for uid, result in zip(missing_new_ids, missing_results):
+                        new_user_map[uid] = result
 
             if lost_ids:
                 logging.info(f"Resolving {len(lost_ids)} lost follower usernames...")
                 lost_follower_users = await self.x_service.get_users_by_ids(lost_ids)
                 lost_user_map = {int(u.id): u.username for u in lost_follower_users}
-                for uid in lost_ids:
-                    if uid not in lost_user_map:
-                        lost_user_map[uid] = await self.x_service.resolve_user_fallback(uid)
+
+                missing_lost_ids = [uid for uid in lost_ids if uid not in lost_user_map]
+                if missing_lost_ids:
+                    missing_results = await asyncio.gather(
+                        *(self.x_service.resolve_user_fallback(uid) for uid in missing_lost_ids)
+                    )
+                    for uid, result in zip(missing_lost_ids, missing_results):
+                        lost_user_map[uid] = result
 
         # Update follower list in DB
         await asyncio.to_thread(self.db.replace_followers, current_follower_ids)

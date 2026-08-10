@@ -27,6 +27,12 @@ package = true
 requires = ["setuptools>=83.0.0"]
 build-backend = "setuptools.build_meta"
 
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+]
+
 [project.optional-dependencies]
 dev = [
     "pytest>=9.1.1",
