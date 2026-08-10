@@ -103,7 +103,11 @@ async def test_unblock_user_success(x_service, mock_api_v1):
 async def test_unblock_user_not_found(x_service, mock_api_v1, mock_async_client):
     """Test unblock_user returns NOT_FOUND on 404 if user doesn't exist."""
     mock_api_v1.destroy_block.side_effect = tweepy.errors.NotFound(MagicMock())
-    mock_async_client.get_user.side_effect = tweepy.errors.NotFound(MagicMock())
+
+    async def mock_get_user(*args, **kwargs):
+        raise tweepy.errors.NotFound(MagicMock())
+
+    mock_async_client.get_user.side_effect = mock_get_user
     mock_api_v1.get_user.side_effect = tweepy.errors.NotFound(MagicMock())
 
     result = await x_service.unblock_user(999)
