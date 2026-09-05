@@ -79,17 +79,25 @@ class InsightsAgent(BaseAgent):
                 logging.info(f"Resolving {len(new_ids)} new follower usernames...")
                 new_follower_users = await self.x_service.get_users_by_ids(new_ids)
                 new_user_map = {int(u.id): u.username for u in new_follower_users}
-                for uid in new_ids:
-                    if uid not in new_user_map:
-                        new_user_map[uid] = await self.x_service.resolve_user_fallback(uid)
+                unresolved_new = [uid for uid in new_ids if uid not in new_user_map]
+                if unresolved_new:
+                    resolved_handles = await asyncio.gather(
+                        *(self.x_service.resolve_user_fallback(uid) for uid in unresolved_new)
+                    )
+                    for uid, handle in zip(unresolved_new, resolved_handles):
+                        new_user_map[uid] = handle
 
             if lost_ids:
                 logging.info(f"Resolving {len(lost_ids)} lost follower usernames...")
                 lost_follower_users = await self.x_service.get_users_by_ids(lost_ids)
                 lost_user_map = {int(u.id): u.username for u in lost_follower_users}
-                for uid in lost_ids:
-                    if uid not in lost_user_map:
-                        lost_user_map[uid] = await self.x_service.resolve_user_fallback(uid)
+                unresolved_lost = [uid for uid in lost_ids if uid not in lost_user_map]
+                if unresolved_lost:
+                    resolved_handles = await asyncio.gather(
+                        *(self.x_service.resolve_user_fallback(uid) for uid in unresolved_lost)
+                    )
+                    for uid, handle in zip(unresolved_lost, resolved_handles):
+                        lost_user_map[uid] = handle
 
         # Update follower list in DB
         await asyncio.to_thread(self.db.replace_followers, current_follower_ids)
