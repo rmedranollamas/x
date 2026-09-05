@@ -119,3 +119,41 @@ async def test_execute_with_follower_changes(
     assert "Lost (1):" in report
     assert " - @lost_user3" in report
     mock_db_manager.replace_followers.assert_called_once_with({1, 2, 4, 5})
+
+
+@pytest.mark.asyncio
+async def test_execute_with_fallback_resolution(
+    insights_agent, mock_x_service, mock_db_manager
+):
+    """Test insights agent fallback resolution using asyncio.gather for missing user handles."""
+    mock_me = MagicMock()
+    mock_me.public_metrics = {
+        "followers_count": 102,
+        "following_count": 50,
+        "tweet_count": 10,
+        "listed_count": 5,
+    }
+    mock_me.created_at = None
+    mock_x_service.get_me.return_value = MagicMock(data=mock_me)
+
+    mock_x_service.get_follower_user_ids.return_value = {10, 20}
+    mock_db_manager.get_all_follower_ids.return_value = {30, 40}
+
+    # get_users_by_ids returns empty list, forcing fallback for all
+    mock_x_service.get_users_by_ids.return_value = []
+
+    async def mock_resolve_fallback(uid):
+        return f"fallback_user_{uid}"
+
+    mock_x_service.resolve_user_fallback.side_effect = mock_resolve_fallback
+
+    mock_db_manager.get_latest_insight.return_value = None
+
+    report = await insights_agent.execute()
+
+    assert "New (2):" in report
+    assert " + @fallback_user_10" in report
+    assert " + @fallback_user_20" in report
+    assert "Lost (2):" in report
+    assert " - @fallback_user_30" in report
+    assert " - @fallback_user_40" in report
