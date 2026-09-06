@@ -88,8 +88,8 @@ class InitialSchema(Migration):
         if definition not in allowed_definitions:
             raise ValueError(f"Unauthorized definition: {definition}")
 
-        cursor.execute(f"PRAGMA table_info({table})")
-        columns = [row[1] for row in cursor.fetchall()]
+        cursor.execute("SELECT name FROM pragma_table_info(?)", (table,))
+        columns = [row[0] for row in cursor.fetchall()]
         if column not in columns:
             logging.info(f"Adding missing column '{column}' to table '{table}'.")
             cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
