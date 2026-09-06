@@ -92,4 +92,6 @@ class InitialSchema(Migration):
         columns = [row[0] for row in cursor.fetchall()]
         if column not in columns:
             logging.info(f"Adding missing column '{column}' to table '{table}'.")
-            cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+            safe_table = table.replace('"', '""')
+            safe_column = column.replace('"', '""')
+            cursor.execute(f'ALTER TABLE "{safe_table}" ADD COLUMN "{safe_column}" {definition}')
