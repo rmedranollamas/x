@@ -103,9 +103,13 @@ class UnfollowAgent(BaseAgent):
             unfollowed_users = await self.x_service.get_users_by_ids(list(unfollowed_ids))
             user_map = {int(u.id): u.username for u in unfollowed_users}
 
-            for uid in unfollowed_ids:
-                if uid not in user_map:
-                    user_map[uid] = await self.x_service.resolve_user_fallback(uid)
+            unresolved = [uid for uid in unfollowed_ids if uid not in user_map]
+            if unresolved:
+                resolved_handles = await asyncio.gather(
+                    *(self.x_service.resolve_user_fallback(uid) for uid in unresolved)
+                )
+                for uid, handle in zip(unresolved, resolved_handles):
+                    user_map[uid] = handle
 
             for uid in sorted(unfollowed_ids):
                 handle = user_map.get(int(uid))
