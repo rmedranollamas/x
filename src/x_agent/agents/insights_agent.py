@@ -75,29 +75,10 @@ class InsightsAgent(BaseAgent):
             new_ids = list(current_follower_ids - previous_follower_ids)
             lost_ids = list(previous_follower_ids - current_follower_ids)
 
-            if new_ids:
-                logging.info(f"Resolving {len(new_ids)} new follower usernames...")
-                new_follower_users = await self.x_service.get_users_by_ids(new_ids)
-                new_user_map = {int(u.id): u.username for u in new_follower_users}
-                unresolved_new = [uid for uid in new_ids if uid not in new_user_map]
-                if unresolved_new:
-                    resolved_handles = await asyncio.gather(
-                        *(self.x_service.resolve_user_fallback(uid) for uid in unresolved_new)
-                    )
-                    for uid, handle in zip(unresolved_new, resolved_handles):
-                        new_user_map[uid] = handle
-
-            if lost_ids:
-                logging.info(f"Resolving {len(lost_ids)} lost follower usernames...")
-                lost_follower_users = await self.x_service.get_users_by_ids(lost_ids)
-                lost_user_map = {int(u.id): u.username for u in lost_follower_users}
-                unresolved_lost = [uid for uid in lost_ids if uid not in lost_user_map]
-                if unresolved_lost:
-                    resolved_handles = await asyncio.gather(
-                        *(self.x_service.resolve_user_fallback(uid) for uid in unresolved_lost)
-                    )
-                    for uid, handle in zip(unresolved_lost, resolved_handles):
-                        lost_user_map[uid] = handle
+            new_user_map, lost_user_map = await asyncio.gather(
+                self._resolve_user_map(new_ids, "new"),
+                self._resolve_user_map(lost_ids, "lost"),
+            )
 
         # Update follower list in DB
         await asyncio.to_thread(self.db.replace_followers, current_follower_ids)
@@ -138,6 +119,21 @@ class InsightsAgent(BaseAgent):
 
         logging.info("Insights agent finished successfully.")
         return report
+
+    async def _resolve_user_map(self, ids: list[int], label: str) -> dict[int, str]:
+        if not ids:
+            return {}
+        logging.info(f"Resolving {len(ids)} {label} follower usernames...")
+        follower_users = await self.x_service.get_users_by_ids(ids)
+        user_map = {int(u.id): u.username for u in follower_users}
+        unresolved = [uid for uid in ids if uid not in user_map]
+        if unresolved:
+            resolved_handles = await asyncio.gather(
+                *(self.x_service.resolve_user_fallback(uid) for uid in unresolved)
+            )
+            for uid, handle in zip(unresolved, resolved_handles):
+                user_map[uid] = handle
+        return user_map
 
     def _generate_report(
         self,
