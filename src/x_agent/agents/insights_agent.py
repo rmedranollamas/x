@@ -3,6 +3,7 @@ import asyncio
 import sqlite3
 import time
 import calendar
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Optional, TYPE_CHECKING, Union
 import tweepy
@@ -11,6 +12,22 @@ from ..services.x_service import XService
 
 if TYPE_CHECKING:
     from ..database import DatabaseManager
+
+
+@dataclass
+class InsightsData:
+    """Container for account metrics and data required to generate an insights report."""
+
+    followers_count: int
+    following_count: int
+    tweet_count: int
+    listed_count: int
+    created_at: Optional[Union[datetime, time.struct_time]] = None
+    comparisons: dict[str, Optional[sqlite3.Row]] = field(default_factory=dict)
+    new_user_map: dict[int, str] = field(default_factory=dict)
+    lost_user_map: dict[int, str] = field(default_factory=dict)
+    new_ids: list[int] = field(default_factory=list)
+    lost_ids: list[int] = field(default_factory=list)
 
 
 class InsightsAgent(BaseAgent):
@@ -92,18 +109,19 @@ class InsightsAgent(BaseAgent):
         }
 
         # Generate the report
-        report = self._generate_report(
-            current_followers_count,
-            current_following_count,
-            current_tweets_count,
-            current_listed_count,
-            created_at,
-            comparisons,
-            new_user_map,
-            lost_user_map,
-            new_ids,
-            lost_ids,
+        data = InsightsData(
+            followers_count=current_followers_count,
+            following_count=current_following_count,
+            tweet_count=current_tweets_count,
+            listed_count=current_listed_count,
+            created_at=created_at,
+            comparisons=comparisons,
+            new_user_map=new_user_map,
+            lost_user_map=lost_user_map,
+            new_ids=new_ids,
+            lost_ids=lost_ids,
         )
+        report = self._generate_report(data)
 
         # Print to stdout as before
         print(report)
@@ -135,19 +153,7 @@ class InsightsAgent(BaseAgent):
                 user_map[uid] = handle
         return user_map
 
-    def _generate_report(
-        self,
-        current_followers: int,
-        current_following: int,
-        current_tweets: int,
-        current_listed: int,
-        created_at: Optional[Union[datetime, time.struct_time]],
-        comparisons: dict[str, Optional[sqlite3.Row]],
-        new_user_map: dict[int, str],
-        lost_user_map: dict[int, str],
-        new_ids: list[int],
-        lost_ids: list[int],
-    ) -> str:
+    def _generate_report(self, data: InsightsData) -> str:
         """
         Generates a comprehensive report optimized for narrow screens.
         """
@@ -158,22 +164,26 @@ class InsightsAgent(BaseAgent):
         lines.append("=" * width)
 
         # 1. Core Metrics
-        ratio = current_followers / current_following if current_following > 0 else 0
-        lines.append(f"Followers: {current_followers:,}")
-        lines.append(f"Following: {current_following:,}")
-        lines.append(f"Tweets:    {current_tweets:,}")
-        lines.append(f"Listed:    {current_listed:,}")
+        ratio = (
+            data.followers_count / data.following_count
+            if data.following_count > 0
+            else 0
+        )
+        lines.append(f"Followers: {data.followers_count:,}")
+        lines.append(f"Following: {data.following_count:,}")
+        lines.append(f"Tweets:    {data.tweet_count:,}")
+        lines.append(f"Listed:    {data.listed_count:,}")
         lines.append(f"Ratio:     {ratio:.2f}")
         lines.append("-" * width)
 
         # 2. Follower Changes
-        if new_ids or lost_ids:
+        if data.new_ids or data.lost_ids:
             lines.append("           FOLLOWERS LOG")
 
-            if new_ids:
-                lines.append(f"New ({len(new_ids)}):")
-                for uid in sorted(new_ids):
-                    handle = new_user_map.get(int(uid))
+            if data.new_ids:
+                lines.append(f"New ({len(data.new_ids)}):")
+                for uid in sorted(data.new_ids):
+                    handle = data.new_user_map.get(int(uid))
                     if handle:
                         if handle.startswith("("):
                             lines.append(f" + ID: {uid} {handle}")
@@ -181,10 +191,10 @@ class InsightsAgent(BaseAgent):
                             lines.append(f" + @{handle}")
                     else:
                         lines.append(f" + ID: {uid}")
-            if lost_ids:
-                lines.append(f"Lost ({len(lost_ids)}):")
-                for uid in sorted(lost_ids):
-                    handle = lost_user_map.get(int(uid))
+            if data.lost_ids:
+                lines.append(f"Lost ({len(data.lost_ids)}):")
+                for uid in sorted(data.lost_ids):
+                    handle = data.lost_user_map.get(int(uid))
                     if handle:
                         if handle.startswith("("):
                             lines.append(f" - ID: {uid} {handle}")
@@ -195,17 +205,17 @@ class InsightsAgent(BaseAgent):
             lines.append("-" * width)
 
         # 3. Account Vitality
-        if created_at:
-            if isinstance(created_at, datetime):
-                creation_dt = created_at
+        if data.created_at:
+            if isinstance(data.created_at, datetime):
+                creation_dt = data.created_at
             else:
                 creation_dt = datetime.fromtimestamp(
-                    time.mktime(created_at), tz=timezone.utc
+                    time.mktime(data.created_at), tz=timezone.utc
                 )
 
             now = datetime.now(timezone.utc)
             age_days = max((now - creation_dt).days, 1)
-            avg_tweets_per_day = current_tweets / age_days
+            avg_tweets_per_day = data.tweet_count / age_days
 
             lines.append("          ACCOUNT VITALITY")
             lines.append(f"Age:      {age_days:,} days")
@@ -217,14 +227,14 @@ class InsightsAgent(BaseAgent):
         lines.append("-" * width)
 
         has_history = False
-        for label, insight in comparisons.items():
+        for label, insight in data.comparisons.items():
             if not insight:
                 continue
             has_history = True
 
-            f_delta = current_followers - insight["followers"]
-            t_delta = current_tweets - insight["tweet_count"]
-            l_delta = current_listed - insight["listed_count"]
+            f_delta = data.followers_count - insight["followers"]
+            t_delta = data.tweet_count - insight["tweet_count"]
+            l_delta = data.listed_count - insight["listed_count"]
 
             f_delta_str = f"{f_delta:+}"
             t_delta_str = f"{t_delta:+}"
@@ -240,7 +250,9 @@ class InsightsAgent(BaseAgent):
         lines.append("-" * width)
 
         # 5. Growth Velocity & Projections
-        day_insight = comparisons.get("24h Ago") or comparisons.get("Previous")
+        day_insight = data.comparisons.get("24h Ago") or data.comparisons.get(
+            "Previous"
+        )
         if day_insight:
             try:
                 ts_str = day_insight["timestamp"].split(".")[0]
@@ -250,14 +262,20 @@ class InsightsAgent(BaseAgent):
             except Exception:
                 delta_days = 1
 
-            daily_velocity = (current_followers - day_insight["followers"]) / delta_days
+            daily_velocity = (
+                data.followers_count - day_insight["followers"]
+            ) / delta_days
 
             if daily_velocity > 0:
                 lines.append(f"Velocity:  {daily_velocity:.1f} followers/day")
                 for milestone in [100, 500, 1000, 5000, 10000, 50000, 100000]:
-                    if current_followers < milestone:
-                        days_to_go = (milestone - current_followers) / daily_velocity
-                        lines.append(f"Target:    {milestone:,} in {int(days_to_go)}d")
+                    if data.followers_count < milestone:
+                        days_to_go = (
+                            milestone - data.followers_count
+                        ) / daily_velocity
+                        lines.append(
+                            f"Target:    {milestone:,} in {int(days_to_go)}d"
+                        )
                         break
             elif daily_velocity < 0:
                 lines.append(f"Velocity:  {daily_velocity:.1f} (Downwards)")
