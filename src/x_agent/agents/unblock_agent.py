@@ -157,22 +157,7 @@ class UnblockAgent(BaseAgent):
             tasks = [unblock_worker(uid) for uid in chunk]
             results = await asyncio.gather(*tasks)
 
-            # Process chunk results
-            chunk_status_map = {"SUCCESS": [], "NOT_FOUND": [], "FAILED": []}
-            for user_id, status in results:
-                if status in chunk_status_map:
-                    chunk_status_map[status].append(user_id)
-                    session_stats[status] += 1
-
-            # Update database for this chunk
-            if not self.dry_run:
-                for status, uids in chunk_status_map.items():
-                    if uids:
-                        await asyncio.to_thread(
-                            self.db.update_user_statuses,
-                            uids,
-                            status if status != "SUCCESS" else "UNBLOCKED",
-                        )
+            await self._process_unblock_chunk(results, session_stats)
 
         end_time = time.time()
         duration = end_time - start_time
@@ -193,3 +178,31 @@ class UnblockAgent(BaseAgent):
             logging.warning(
                 f"Failed to unblock {session_stats['FAILED']} accounts. They will be retried on the next run."
             )
+
+    async def _process_unblock_chunk(
+        self,
+        results: list[tuple[int, str]],
+        session_stats: dict[str, int],
+    ) -> None:
+        """
+        Processes chunk results and updates the database with new statuses.
+        """
+        chunk_status_map: dict[str, list[int]] = {
+            "SUCCESS": [],
+            "NOT_FOUND": [],
+            "FAILED": [],
+        }
+        for user_id, status in results:
+            if status in chunk_status_map:
+                chunk_status_map[status].append(user_id)
+                session_stats[status] += 1
+
+        # Update database for this chunk
+        if not self.dry_run:
+            for status, uids in chunk_status_map.items():
+                if uids:
+                    await asyncio.to_thread(
+                        self.db.update_user_statuses,
+                        uids,
+                        status if status != "SUCCESS" else "UNBLOCKED",
+                    )
