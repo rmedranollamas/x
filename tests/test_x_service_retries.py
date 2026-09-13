@@ -5,9 +5,10 @@ from x_agent.services.x_service import XService, is_transient_error
 
 
 def test_is_transient_error():
-    # 5xx errors should be transient
+    # 5xx errors should be transient (v1 status_code)
     mock_resp = MagicMock()
     mock_resp.status_code = 500
+    mock_resp.json.return_value = {}
     err = tweepy.errors.HTTPException(mock_resp)
     assert is_transient_error(err) is True
 
@@ -15,17 +16,40 @@ def test_is_transient_error():
     err = tweepy.errors.HTTPException(mock_resp)
     assert is_transient_error(err) is True
 
+    # 5xx errors (v2 status attribute)
+    mock_resp_v2 = MagicMock(spec=["status", "json", "reason", "text"])
+    mock_resp_v2.status = 502
+    mock_resp_v2.json.return_value = {}
+    err_v2 = tweepy.errors.HTTPException(mock_resp_v2)
+    assert is_transient_error(err_v2) is True
+
     # 4xx errors (except maybe 429 which is handled by Tweepy) are usually NOT transient
     mock_resp.status_code = 404
     err = tweepy.errors.HTTPException(mock_resp)
     assert is_transient_error(err) is False
 
-    # Connection errors
+    # Connection and Timeout errors wrapped in TweepyException
     err = tweepy.errors.TweepyException("Connection timed out")
     assert is_transient_error(err) is True
 
-    # Generic Exception
+    err_timeout = tweepy.errors.TweepyException("Request Timeout occurred")
+    assert is_transient_error(err_timeout) is True
+
+    # TweepyException without 5xx or connection/timeout message
+    err_other_tweepy = tweepy.errors.TweepyException("Invalid user ID")
+    assert is_transient_error(err_other_tweepy) is False
+
+    # AttributeError handling for tweepy async client side-effect
+    attr_err_transient = AttributeError("'NoneType' object has no attribute 'items'")
+    assert is_transient_error(attr_err_transient) is True
+
+    attr_err_other = AttributeError("'NoneType' object has no attribute 'foo'")
+    assert is_transient_error(attr_err_other) is False
+
+    # Generic Exception fallback return False
     assert is_transient_error(Exception("Foo")) is False
+    assert is_transient_error(Exception("Connection timed out")) is False
+    assert is_transient_error(ValueError("Invalid value")) is False
 
 
 @pytest.mark.asyncio
