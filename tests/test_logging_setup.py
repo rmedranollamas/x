@@ -1,9 +1,7 @@
 """Tests for the logging_setup module."""
 import logging
 import io
-import sys
-import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock
 from x_agent.logging_setup import SingleLineUpdateHandler, setup_logging
 
 
