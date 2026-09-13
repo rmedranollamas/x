@@ -112,6 +112,39 @@ def test_unfollow_command(mock_x_service, mock_db_manager, mock_agents):
             )
 
 
+def test_db_backup_success(mock_db_manager):
+    mock_db_instance = mock_db_manager.return_value
+    mock_db_instance.backup_database.return_value = "/path/to/backup.db"
+
+    result = runner.invoke(app, ["db", "backup"])
+
+    assert result.exit_code == 0
+    assert "Backup created at: /path/to/backup.db" in result.output
+    mock_db_instance.backup_database.assert_called_once()
+
+
+def test_db_backup_failure(mock_db_manager):
+    mock_db_instance = mock_db_manager.return_value
+    mock_db_instance.backup_database.return_value = None
+
+    result = runner.invoke(app, ["db", "backup"])
+
+    assert result.exit_code == 0
+    assert "Backup failed or no database exists." in result.output
+    mock_db_instance.backup_database.assert_called_once()
+
+
+def test_db_backup_debug_flag(mock_db_manager):
+    with patch("x_agent.cli.setup_logging") as mock_setup_logging:
+        mock_db_instance = mock_db_manager.return_value
+        mock_db_instance.backup_database.return_value = "/path/to/backup.db"
+
+        result = runner.invoke(app, ["db", "backup", "--debug"])
+
+        assert result.exit_code == 0
+        mock_setup_logging.assert_called_with(True)
+
+
 def test_invalid_command():
     result = runner.invoke(app, ["invalid"])
     assert result.exit_code != 0
