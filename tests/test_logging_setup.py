@@ -108,8 +108,28 @@ class TestSingleLineUpdateHandler:
             exc_info=None,
         )
         
-        # Should not raise an exception
+        # Should return early and not raise an exception
         handler.emit(record)
+
+    def test_emit_stream_error_calls_handle_error(self):
+        """Test that emit calls handleError when writing/flushing stream raises an exception."""
+        stream = io.StringIO()
+        stream.write = MagicMock(side_effect=ValueError("Stream error"))
+        handler = SingleLineUpdateHandler(stream)
+        handler.handleError = MagicMock()
+
+        record = logging.LogRecord(
+            name="test",
+            level=logging.INFO,
+            pathname="test.py",
+            lineno=1,
+            msg="Test",
+            args=(),
+            exc_info=None,
+        )
+
+        handler.emit(record)
+        handler.handleError.assert_called_once_with(record)
 
     def test_emit_non_tty_stream(self):
         """Test that single_line messages work on non-TTY streams."""
