@@ -61,7 +61,7 @@ class SingleLineUpdateHandler(logging.StreamHandler):
                 print(message, file=self.stream, flush=True)
         except (ValueError, RuntimeError, AttributeError):
             # Fallback for closed streams during tests/shutdown
-            pass
+            self.handleError(record)
 
 
 def setup_logging(debug: bool = False) -> None:
