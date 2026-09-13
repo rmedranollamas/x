@@ -1,3 +1,4 @@
+from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 from unittest.mock import patch, AsyncMock
@@ -128,3 +129,20 @@ def test_cli_config_error(mock_x_service, mock_db_manager):
 
         assert result.exit_code == 1
         assert "Configuration Error: Missing X_API_KEY" in result.output
+
+
+def test_db_info_command(mock_db_manager):
+    """Test the db info command outputs expected database configuration information."""
+    mock_db_inst = mock_db_manager.return_value
+    mock_db_inst.db_path = Path("/path/to/test_db.sqlite")
+
+    with patch("x_agent.cli.settings") as mock_settings:
+        mock_settings.environment = "development"
+        mock_settings.is_dev = True
+
+        result = runner.invoke(app, ["db", "info"])
+
+        assert result.exit_code == 0
+        assert "Environment: development" in result.output
+        assert "Database File: /path/to/test_db.sqlite" in result.output
+        assert "Is Dev: True" in result.output
