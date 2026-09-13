@@ -52,8 +52,8 @@ class InitialSchema(Migration):
         self._ensure_column(cursor, "blocked_users", "updated_at", "DATETIME")
 
         # Data cleanup (legacy)
-        cursor.execute("PRAGMA table_info(blocked_users)")
-        columns = [row[1] for row in cursor.fetchall()]  # row is (cid, name, type, ...)
+        cursor.execute("SELECT name FROM pragma_table_info(?)", ("blocked_users",))
+        columns = [row[0] for row in cursor.fetchall()]
 
         if "updated_at" in columns:
             cursor.execute(
