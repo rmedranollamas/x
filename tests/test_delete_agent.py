@@ -1,10 +1,8 @@
 """Comprehensive tests for DeleteAgent."""
 import pytest
 import json
-import asyncio
 from datetime import datetime, timezone, timedelta
-from pathlib import Path
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import MagicMock, AsyncMock
 import tweepy
 
 from x_agent.agents.delete_agent import DeleteAgent, MockStatus

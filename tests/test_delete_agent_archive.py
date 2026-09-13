@@ -1,7 +1,6 @@
 import pytest
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, AsyncMock
-from pathlib import Path
 from x_agent.agents.delete_agent import DeleteAgent, MockStatus
 from x_agent.services.x_service import XService
 from x_agent.database import DatabaseManager
