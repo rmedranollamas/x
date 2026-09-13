@@ -118,6 +118,66 @@ def test_invalid_command():
     assert "No such command" in result.output
 
 
+def test_delete_command_default(mock_x_service, mock_db_manager):
+    with patch("x_agent.cli.DeleteAgent") as mock_delete_cls:
+        mock_delete_instance = mock_delete_cls.return_value
+        with patch.object(mock_delete_instance, "execute", new_callable=AsyncMock, return_value="Report"):
+            result = runner.invoke(app, ["delete"])
+
+            assert result.exit_code == 0
+            mock_delete_cls.assert_called_once_with(
+                mock_x_service.return_value,
+                mock_db_manager.return_value,
+                dry_run=False,
+                protected_ids=None,
+                archive_path=None,
+            )
+
+
+def test_delete_command_with_options(mock_x_service, mock_db_manager):
+    with patch("x_agent.cli.DeleteAgent") as mock_delete_cls, patch(
+        "x_agent.cli.send_report_email", new_callable=AsyncMock
+    ) as mock_send_email:
+        mock_delete_instance = mock_delete_cls.return_value
+        mock_delete_instance.execute = AsyncMock(return_value="Delete Report")
+
+        result = runner.invoke(
+            app,
+            [
+                "delete",
+                "--debug",
+                "--dry-run",
+                "--email",
+                "--protected-id",
+                "111",
+                "--protected-id",
+                "222",
+                "--archive",
+                "tweets.js",
+            ],
+        )
+
+        assert result.exit_code == 0
+        mock_delete_cls.assert_called_once_with(
+            mock_x_service.return_value,
+            mock_db_manager.return_value,
+            dry_run=True,
+            protected_ids=[111, 222],
+            archive_path="tweets.js",
+        )
+        mock_send_email.assert_called_once_with("Delete Report")
+
+
+def test_delete_command_exception(mock_x_service, mock_db_manager):
+    with patch("x_agent.cli.DeleteAgent") as mock_delete_cls:
+        mock_delete_instance = mock_delete_cls.return_value
+        mock_delete_instance.execute.side_effect = Exception("Agent failed")
+
+        result = runner.invoke(app, ["delete"])
+
+        assert result.exit_code == 1
+
+
 def test_cli_config_error(mock_x_service, mock_db_manager):
     """Test that the CLI exits with an error if configuration is invalid."""
     with patch("x_agent.cli.settings") as mock_settings:
