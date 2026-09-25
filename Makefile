@@ -1,7 +1,7 @@
 .PHONY: all build build-all build-linux-amd64 build-linux-arm64 install test test-e2e vet fmt clean
 
-GO ?= /usr/local/go/bin/go
-GOFMT ?= /usr/local/go/bin/gofmt
+GO ?= $(shell command -v go 2>/dev/null || echo /usr/local/go/bin/go)
+GOFMT ?= $(shell command -v gofmt 2>/dev/null || echo /usr/local/go/bin/gofmt)
 DIST_DIR := dist
 
 all: fmt vet test-e2e build-all
