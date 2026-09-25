@@ -12,35 +12,34 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
-    env:
-      X_API_KEY: dummy_api_key
-      X_API_KEY_SECRET: dummy_api_key_secret
-      X_ACCESS_TOKEN: dummy_access_token
-      X_ACCESS_TOKEN_SECRET: dummy_access_token_secret
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Set up Go
+        uses: actions/setup-go@v5
         with:
-          python-version: "3.13"
+          go-version-file: go.mod
 
-      - name: Install uv
-        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+      - name: Check formatting
+        run: |
+          if [ -n "$(gofmt -s -l .)" ]; then
+            echo "The following files are not formatted according to gofmt:"
+            gofmt -s -d .
+            exit 1
+          fi
 
-      - name: Install dependencies
-        run: uv pip install --system -e ".[dev]"
+      - name: Static analysis (go vet)
+        run: go vet ./...
 
       - name: Run tests with coverage
-        run: |
-          export X_API_KEY=dummy_api_key
-          export X_API_KEY_SECRET=dummy_api_key_secret
-          export X_ACCESS_TOKEN=dummy_access_token
-          export X_ACCESS_TOKEN_SECRET=dummy_access_token_secret
-          uv run pytest tests/ -v --cov=src --cov-report=xml --cov-report=html --cov-fail-under=80
+        run: go test -v -race -coverprofile=coverage.txt -covermode=atomic ./...
+
+      - name: Build verification
+        run: make build-all
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v5
         with:
-          files: ./coverage.xml
+          files: ./coverage.txt
           fail_ci_if_error: false

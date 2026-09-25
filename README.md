@@ -1,150 +1,195 @@
 # X Agent Framework
 
-This is a command-line tool to manage your X (formerly Twitter) account using a collection of specialized agents.
+A standalone, high-performance Go command-line tool to manage your X (formerly Twitter) account via modular agents.
 
-The framework is designed to be extensible, allowing for the easy addition of new agents to perform various tasks on your X profile. It uses the X API, automatically handles rate limiting, and saves progress in a local SQLite database for resumable operations.
+Inspired by clean, production-grade Go CLI architecture, `x-agent` requires zero CGO, uses pure Go SQLite persistence, separates stdout/stderr for Unix pipeline composability, and provides resilient API rate-limit recovery.
 
 ## Features
 
-*   **Extensible:** Easily add new agents for different tasks.
-*   **Asynchronous:** Uses `asyncio` for concurrent API interactions.
-*   **Email Reporting:** The `insights` agent can automatically email reports via SMTP.
-*   **Resumable:** Progress is saved in an SQLite database.
-*   **Environment Aware:** Supports separate development and production databases using `X_AGENT_ENV`.
-*   **Rate Limit Handling:** Automatically handles X API rate limits with built-in wait-and-resume logic.
-*   **Robust:** Gracefully handles deleted, suspended, or missing accounts.
-*   **Resilient:** Includes automatic retries for transient network errors.
-*   **Safe:** Validates configuration on startup and offers a `--dry-run` mode.
-*   **Modern CLI:** Built with `Typer` with clear visibility into which database/environment is active.
+- **Pure Go & Zero-CGO**: Single static binary compiled with pure Go SQLite (`modernc.org/sqlite`), eliminating runtime dependencies.
+- **Dual API Client**: Lightweight client combining Twitter v1.1 and v2 endpoints with OAuth 1.0a authentication.
+- **Intelligent Rate Limiting**: Automatic detection and handling of 15m and 24h rate limit windows with backoff and resume.
+- **Zombie Unblock Recovery**: 3-tier recovery state machine (v1.1 destroy -> v2 unblock -> toggle block) to overcome stale block states.
+- **Modular Agents**:
+  - `insights`: Computes account metrics, follower ratios, vitality scores, and net changes.
+  - `unblock`: Mass unblock processing with resilient recovery.
+  - `unfollow`: Tracks follower baseline and detects who unfollowed you.
+  - `delete`: Multi-tier tweet pruning from live API and X data archives (`tweets.js`).
+  - `blocked-ids`: Fast retrieval of blocked account IDs (pipeable to stdout).
+  - `db`: Local SQLite schema migrations, inspection, and automated timestamped backups.
+- **Email Reporting**: Native Go SMTP reporting for daily insights delivery.
+- **Environment Aware**: Toggle between `development` and `production` databases via `X_AGENT_ENV`.
+- **Safe**: `--dry-run` simulation mode on state-mutating commands.
 
 ## Requirements
 
-*   Python 3.13+
-*   An X Developer Account with an App that has v1.1 and v2 API access.
+- Go 1.23+ (when building from source) or a precompiled binary.
+- An X Developer App with Read and Write permissions (v1.1 and v2 access).
 
-## Setup Instructions
+## Installation
 
-1.  **Clone the Repository:**
-    ```bash
-    git clone https://github.com/rmedranollamas/x.git
-    cd x
-    ```
+### From Source
 
-2.  **Install `uv`:**
-    This project uses `uv` for dependency management.
-    ```bash
-    pip install uv
-    ```
+```bash
+git clone https://github.com/rmedranollamas/x.git
+cd x
 
-3.  **Install Dependencies:**
-    ```bash
-    uv sync
-    ```
+# Build local binary (placed at ./x-agent and ./dist/x-agent)
+make build
 
-4.  **Set Up Your Credentials:**
-    *   Copy the example `.env.example` file to a new `.env` file: `cp .env.example .env`
-    *   Open the `.env` file and fill in your X API credentials and SMTP settings for email reporting.
+# Or install to your $GOPATH/bin
+make install
+```
 
-    ```env
-    # X API
-    X_API_KEY="..."
-    X_API_KEY_SECRET="..."
-    X_ACCESS_TOKEN="..."
-    X_ACCESS_TOKEN_SECRET="..."
+### Multi-Architecture Builds
 
-    # Optional: Environment (defaults to development)
-    X_AGENT_ENV=production
+To build cross-platform binaries for both AMD64 and ARM64:
 
-    # Email (Required for --email flag)
-    SMTP_HOST="smtp.gmail.com"
-    SMTP_PORT=587
-    SMTP_USER="your-email@example.com"
-    SMTP_PASSWORD="your-app-password"
-    REPORT_SENDER="sender@example.com"
-    REPORT_RECIPIENT="recipient@example.com"
-    ```
+```bash
+make build-all
+```
 
-## How to Run
+Outputs:
+
+- `dist/x-agent`
+- `dist/x-agent-linux-amd64`
+- `dist/x-agent-linux-arm64`
+
+## Configuration
+
+Copy `.env.example` to `.env` in the project root:
+
+```bash
+cp .env.example .env
+```
+
+Configure your credentials:
+
+```env
+# X (Twitter) API OAuth 1.0a Credentials
+X_API_KEY="your-api-key"
+X_API_KEY_SECRET="your-api-secret"
+X_ACCESS_TOKEN="your-access-token"
+X_ACCESS_TOKEN_SECRET="your-access-token-secret"
+
+# Environment: "development" or "production" (defaults to development)
+X_AGENT_ENV=production
+
+# Email Reporting Settings (Required for insights --email)
+SMTP_HOST="smtp.gmail.com"
+SMTP_PORT=587
+SMTP_USER="your-email@example.com"
+SMTP_PASSWORD="your-app-password"
+REPORT_SENDER="sender@example.com"
+REPORT_RECIPIENT="recipient@example.com"
+```
+
+## Usage
 
 ### Available Agents
 
-*   **Insights:** Gathers and reports account metrics.
-    ```bash
-    uv run x-agent insights [--email]
-    ```
+#### 1. Account Insights
 
-*   **Unblocker:** Mass unblocks accounts.
-    ```bash
-    uv run x-agent unblock [--user-id ID] [--refresh]
-    ```
+Gather account metrics and optionally email a summary:
 
-*   **Unfollow:** Detects who has unfollowed you since the last run.
-    ```bash
-    uv run x-agent unfollow
-    ```
-
-*   **Delete:** Removes old tweets based on age and engagement rules. Supports live API and X archive files.
-    ```bash
-    uv run x-agent delete [--archive tweets.js] [--protected-id ID] [--dry-run]
-    ```
-
-*   **Blocked IDs:** Lists all currently blocked user IDs.
-    ```bash
-    uv run x-agent blocked-ids
-    ```
-
-### Automation
-
-You can set up a daily automated report using the included cron setup helper:
 ```bash
-python3 scripts/setup_cron.py
-```
-This will install a daily cronjob (default 9:00 AM) that runs the insights agent with email reporting enabled.
-
-### Global Options
-
-Use `--dry-run` to simulate actions without applying them (available for `unblock`, `unfollow`, and `delete`):
-```bash
-uv run x-agent unblock --dry-run
+./x-agent insights
+./x-agent insights --email
 ```
 
-Use `--debug` with any command for detailed logging:
+#### 2. Mass Unblock
+
+Unblock all blocked accounts or target a specific user ID:
+
 ```bash
-uv run x-agent insights --debug
+./x-agent unblock
+./x-agent unblock --user-id 12345678
+./x-agent unblock --refresh
+./x-agent unblock --dry-run
 ```
 
-### Database Management
+#### 3. Unfollow Detection
 
-The framework includes utilities for managing the local SQLite state:
+Detect accounts that unfollowed you since the baseline was established:
 
-*   **Info:** Show current environment and database path.
-    ```bash
-    uv run x-agent db info
-    ```
-
-*   **Backup:** Create a timestamped backup of the database in `.state/backups/`.
-    ```bash
-    uv run x-agent db backup
-    ```
-
-## Deletion Rules
-
-The `delete` agent uses a multi-tier rule system to decide what to keep:
-
-1.  **Grace Period:** Never deletes anything younger than 7 days.
-2.  **Protected Content:** Keeps pinned tweets, threads, and media.
-3.  **Engagement Thresholds:**
-    *   Older than 30 days: Deletes low-engagement retweets.
-    *   Older than 365 days: Deletes unless specifically protected.
-    *   In-between: Deletes if likes + retweets fall below a threshold (higher for top-level tweets than replies).
-
-## Architecture
-
-*   **Service Layer:** Robust wrapper around Tweepy that handles both v1.1 and v2 APIs with automated rate-limit recovery and retry logic.
-*   **Agent Layer:** Modular architecture where each task is encapsulated in its own agent.
-*   **Database Manager:** Centralized state management with SQLite, including an automated migration system for schema updates.
-
-For more information, use the `--help` flag:
 ```bash
-uv run x-agent --help
+./x-agent unfollow
+./x-agent unfollow --dry-run
+```
+
+#### 4. Tweet Deletion & Archive Pruning
+
+Prune tweets using live API scanning or an official X data archive (`tweets.js`):
+
+```bash
+./x-agent delete --dry-run
+./x-agent delete --archive tweets.js
+./x-agent delete --archive tweets.js --max 50
+./x-agent delete --protected-id 1234567890
+```
+
+#### 5. Blocked IDs
+
+Extract blocked IDs. Designed for Unix stream pipelines (pipeable pure data on stdout):
+
+```bash
+./x-agent blocked-ids > blocked_ids.txt
+```
+
+#### 6. Database Management
+
+Inspect database paths or trigger automated backups:
+
+```bash
+./x-agent db info
+./x-agent db backup
+```
+
+### Global Flags
+
+- `--dry-run`: Simulate operations without modifying external state (available on `unblock`, `unfollow`, `delete`).
+- `--debug`: Enable verbose debug logging to stderr.
+- `-h, --help`: Display command documentation.
+
+## Automation
+
+Install a daily 9:00 AM cronjob to automatically generate and email account insights:
+
+```bash
+./scripts/setup_cron.sh
+```
+
+For automated / non-interactive installation:
+
+```bash
+./scripts/setup_cron.sh --yes
+```
+
+Logs are appended to `.state/cron.log`.
+
+## Tweet Pruning Rules
+
+The `delete` agent applies multi-tier safety rules:
+
+1. **Grace Period**: Tweets younger than 7 days are never deleted.
+1. **Protected Content**: Pinned tweets, threads, and media tweets are preserved.
+1. **Age & Engagement Tiers**:
+   - **> 30 days**: Prunes low-engagement retweets.
+   - **> 365 days**: Prunes unless specifically protected.
+   - **Intermediate**: Prunes if engagement falls below dynamic thresholds.
+
+## Development
+
+```bash
+# Run static analysis
+make vet
+
+# Format code
+make fmt
+
+# Run end-to-end test suite
+make test-e2e
+
+# Run all quality checks and builds
+make all
 ```

@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-CLI framework for X (Twitter) account management via modular agents, supporting both a Python reference implementation and a standalone, high-performance Go application.
+Standalone, high-performance Go CLI framework for X (Twitter) account management via modular agents.
 
 ## Go Architecture (`github.com/rmedranollamas/x-agent`)
 
@@ -12,7 +12,7 @@ CLI framework for X (Twitter) account management via modular agents, supporting 
 - **internal/xapi:** Lightweight dual-API client (`dghubble/oauth1` + standard `net/http`) covering v1.1/v2 endpoints, 15m/24h rate limit detection, and 3-tier zombie unblock recovery.
 - **internal/agents:** 5 core agents (`unblock`, `insights`, `blocked-ids`, `unfollow`, `delete`) and pure Go SMTP reporting.
 
-## Key Technologies (Go)
+## Key Technologies
 
 - Go 1.23+ (`/usr/local/go/bin/go`)
 - `modernc.org/sqlite` (Zero-CGO SQLite persistence)
@@ -25,10 +25,6 @@ CLI framework for X (Twitter) account management via modular agents, supporting 
 
 1. Build binary: `make build` (outputs to `dist/x-agent` and `./x-agent`)
 1. Multi-arch build: `make build-all` (generates `linux/amd64` and `linux/arm64`)
+1. Install: `make install` (installs to `$GOPATH/bin`)
 1. Run tests: `make test` or `make test-e2e`
 1. Execute: `./x-agent [insights|unblock|unfollow|delete|blocked-ids|db] [flags]`
-
-## Python Reference Implementation
-
-- **Technologies:** Python 3.13+, `tweepy`, `aiosmtplib`, `typer`, `pydantic-settings`, `uv`.
-- **Run:** `uv run x-agent [AGENT] [--email] [--debug]`
