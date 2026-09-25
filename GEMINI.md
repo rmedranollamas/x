@@ -2,45 +2,33 @@
 
 ## Project Overview
 
-Python CLI framework for X (Twitter) account management via modular agents.
+CLI framework for X (Twitter) account management via modular agents, supporting both a Python reference implementation and a standalone, high-performance Go application.
 
-## Architecture
+## Go Architecture (`github.com/rmedranollamas/x-agent`)
 
-- **XService:** Central service for all X API interactions (v1.1 and v2). Uses `tweepy.asynchronous` where possible.
-- **BaseAgent:** Abstract base class for all agents.
-- **Agents:**
-  - `unblock`: Mass unblocks accounts with ghost/zombie protection.
-  - `insights`: Tracks metrics and generates reports. Supports `--email` for automated delivery.
-  - `blocked-ids`: Lists all currently blocked IDs.
-  - `unfollow`: Mass unfollows accounts (e.g., non-followers).
-  - `delete`: Removes old tweets based on age and engagement (views). Supports `--dry-run`.
-- **Persistence:** Environment-aware SQLite database (`.state/insights.db` for production, `insights_dev.db` for development).
-- **CLI:** `Typer`-based entry point (`x-agent`) with environment/DB visibility headers.
-- **Automation:** `scripts/setup_cron.py` helper for installing daily cronjobs.
+- **cmd/x-agent:** Entry point with Cobra CLI, stream separation (stdout for pipeable data, stderr for banners/logs), and environment visibility headers.
+- **internal/config:** Configuration loader supporting `.env` and environment variables (`X_API_KEY`, `X_AGENT_ENV`, SMTP, etc.) with fail-fast validation.
+- **internal/db:** Pure Go SQLite persistence (`modernc.org/sqlite`, zero CGO), single-connection pool (`SetMaxOpenConns(1)`), automated pre-migration backups, and idempotent migrations (`m001`–`m004`).
+- **internal/xapi:** Lightweight dual-API client (`dghubble/oauth1` + standard `net/http`) covering v1.1/v2 endpoints, 15m/24h rate limit detection, and 3-tier zombie unblock recovery.
+- **internal/agents:** 5 core agents (`unblock`, `insights`, `blocked-ids`, `unfollow`, `delete`) and pure Go SMTP reporting.
 
-## Key Technologies
+## Key Technologies (Go)
 
-- Python 3.13+
-- `tweepy` & `tweepy.asynchronous`
-- `aiosmtplib` (Async email reporting)
-- `typer` (CLI)
-- `pydantic-settings` (Configuration)
-- `sqlite3` (Persistence)
-- `uv` (Dependency management)
+- Go 1.23+ (`/usr/local/go/bin/go`)
+- `modernc.org/sqlite` (Zero-CGO SQLite persistence)
+- `github.com/spf13/cobra` (CLI)
+- `github.com/dghubble/oauth1` (OAuth 1.0a authentication)
+- `github.com/caarlos0/env/v11` & `github.com/joho/godotenv` (Configuration)
+- `github.com/cenkalti/backoff/v4` (Exponential backoff retries)
 
-## Development Conventions
+## Running & Building the Go Application
 
-- Asynchronous first: all agents and services use `asyncio`.
-- **Resilience:** Iterative rate-limit handling (no recursion), 24h daily limit detection, and UTC-safe analytics using `calendar.timegm`.
-- **Safe DB handling:** use `transaction` context manager in `DatabaseManager`. UPSERT logic for blocked IDs ensures state consistency on refreshes.
-- **Fail-fast config:** missing credentials or SMTP settings (when using `--email`) stop the app.
-- Environment-aware: `X_AGENT_ENV` toggles between dev and production databases.
-- Informative CLI output: Shows active environment and DB file on every run.
-- Code style: `ruff` formatted, type-hinted, verified with `ty`.
+1. Build binary: `make build` (outputs to `dist/x-agent` and `./x-agent`)
+1. Multi-arch build: `make build-all` (generates `linux/amd64` and `linux/arm64`)
+1. Run tests: `make test` or `make test-e2e`
+1. Execute: `./x-agent [insights|unblock|unfollow|delete|blocked-ids|db] [flags]`
 
-## Running the Tool
+## Python Reference Implementation
 
-1. `uv sync`
-1. `cp .env.example .env` (Add SMTP settings for email reporting)
-1. `uv run x-agent [AGENT] [--email] [--debug]`
-1. `python3 scripts/setup_cron.py` to automate.
+- **Technologies:** Python 3.13+, `tweepy`, `aiosmtplib`, `typer`, `pydantic-settings`, `uv`.
+- **Run:** `uv run x-agent [AGENT] [--email] [--debug]`
