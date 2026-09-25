@@ -343,13 +343,16 @@ func TestUnblockAgent_SingleUser_NotFound(t *testing.T) {
 
 func TestUnblockAgent_Batch_Success(t *testing.T) {
 	ctx := context.Background()
+	var mu sync.Mutex
 	unblockedMap := make(map[int64]bool)
 	client := &mockXClient{
 		getBlockedUserIDsFunc: func(ctx context.Context) ([]int64, error) {
 			return []int64{101, 102, 103}, nil
 		},
 		unblockUserFunc: func(ctx context.Context, userID int64) (string, error) {
+			mu.Lock()
 			unblockedMap[userID] = true
+			mu.Unlock()
 			return "UNBLOCKED", nil
 		},
 	}
@@ -360,8 +363,12 @@ func TestUnblockAgent_Batch_Success(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if len(unblockedMap) != 3 {
-		t.Errorf("expected 3 unblocked accounts, got: %d", len(unblockedMap))
+	mu.Lock()
+	unblockedCount := len(unblockedMap)
+	mu.Unlock()
+
+	if unblockedCount != 3 {
+		t.Errorf("expected 3 unblocked accounts, got: %d", unblockedCount)
 	}
 	if len(mockDatabase.batchUpdatedStatuses["UNBLOCKED"]) != 3 {
 		t.Errorf("expected 3 batch updated users as UNBLOCKED")
@@ -666,10 +673,13 @@ func TestDeleteAgent_Archive_AllRules(t *testing.T) {
 		t.Fatalf("failed to write archive: %v", err)
 	}
 
+	var delMu sync.Mutex
 	deletedTweets := make(map[int64]bool)
 	client := &mockXClient{
 		deleteTweetFunc: func(ctx context.Context, tweetID int64) (bool, error) {
+			delMu.Lock()
 			deletedTweets[tweetID] = true
+			delMu.Unlock()
 			return true, nil
 		},
 	}
