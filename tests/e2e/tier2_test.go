@@ -320,12 +320,13 @@ func TestTier2_BlockedIDs_Unauthorized_401(t *testing.T) {
 
 func TestTier2_BlockedIDs_CursorPagination(t *testing.T) {
 	tc := NewTestContext(t)
+	expectedIDs := []int64{1001, 1002, 1003, 1004, 1005}
 	tc.MockServer.Mu.Lock()
-	tc.MockServer.BlockedIDs = []int64{1001, 1002, 1003, 1004, 1005}
+	tc.MockServer.BlockedIDs = expectedIDs
 	tc.MockServer.Mu.Unlock()
 
 	res := tc.MustRun("blocked-ids")
-	for _, id := range tc.MockServer.BlockedIDs {
+	for _, id := range expectedIDs {
 		if !strings.Contains(res.Stdout, fmt.Sprintf("%d", id)) {
 			t.Errorf("expected blocked ID %d to appear in stdout", id)
 		}
@@ -381,7 +382,10 @@ func TestTier2_Unfollow_UnchangedFollowers(t *testing.T) {
 	tc.InitDBWithSchema()
 
 	// Seed exact same followers as mock server
-	for _, id := range tc.MockServer.FollowerIDs {
+	tc.MockServer.Mu.Lock()
+	followerIDs := append([]int64(nil), tc.MockServer.FollowerIDs...)
+	tc.MockServer.Mu.Unlock()
+	for _, id := range followerIDs {
 		_, _ = tc.QueryDB(tc.DBPath, fmt.Sprintf("INSERT OR IGNORE INTO followers (user_id) VALUES (%d);", id))
 	}
 

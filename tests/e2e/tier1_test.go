@@ -241,8 +241,11 @@ func TestTier1_BlockedIDs_DebugFlag(t *testing.T) {
 	if res.ExitCode != 0 {
 		t.Fatalf("expected exit code 0, got %d", res.ExitCode)
 	}
+	tc.MockServer.Mu.Lock()
+	hasBlocked := len(tc.MockServer.BlockedIDs) > 0
+	tc.MockServer.Mu.Unlock()
 	// Debug logs should go to stderr, stdout contains IDs
-	if res.Stdout == "" && len(tc.MockServer.BlockedIDs) > 0 {
+	if res.Stdout == "" && hasBlocked {
 		t.Errorf("expected IDs in stdout even with --debug")
 	}
 }

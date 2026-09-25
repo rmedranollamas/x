@@ -160,7 +160,9 @@ func TestTier5_Delete_Archive_MaxDeleteFlag(t *testing.T) {
 // outputs strictly numeric IDs to STDOUT and all logging / headers to STDERR.
 func TestTier5_StreamSeparation_BlockedIDs_OnSuccess(t *testing.T) {
 	tc := NewTestContext(t)
+	tc.MockServer.Mu.Lock()
 	tc.MockServer.BlockedIDs = []int64{1001, 1002, 1003}
+	tc.MockServer.Mu.Unlock()
 
 	res := tc.MustRun("blocked-ids")
 
@@ -195,11 +197,9 @@ func TestTier5_StreamSeparation_BlockedIDs_OnError(t *testing.T) {
 	tc := NewTestContext(t)
 
 	// Inject 500 internal server error on blocks endpoint
+	tc.MockServer.Mu.Lock()
 	tc.MockServer.V1RateLimitHeaders = map[string]string{}
 	tc.MockServer.UnblockErrors[999999] = 500
-
-	// Temporarily override handler or set error header
-	tc.MockServer.Mu.Lock()
 	tc.MockServer.BlockedIDs = nil
 	tc.MockServer.Mu.Unlock()
 

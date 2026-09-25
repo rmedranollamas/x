@@ -138,8 +138,9 @@ func NewMockTwitterServer() *MockTwitterServer {
 
 		// v1.1 blocks/ids.json
 		case r.Method == http.MethodGet && r.URL.Path == "/1.1/blocks/ids.json":
+			idsCopy := append([]int64(nil), ms.BlockedIDs...)
 			resp := map[string]interface{}{
-				"ids":             ms.BlockedIDs,
+				"ids":             idsCopy,
 				"next_cursor":     0,
 				"previous_cursor": 0,
 			}
@@ -172,8 +173,9 @@ func NewMockTwitterServer() *MockTwitterServer {
 
 		// v1.1 followers/ids.json
 		case r.Method == http.MethodGet && r.URL.Path == "/1.1/followers/ids.json":
+			idsCopy := append([]int64(nil), ms.FollowerIDs...)
 			resp := map[string]interface{}{
-				"ids":             ms.FollowerIDs,
+				"ids":             idsCopy,
 				"next_cursor":     0,
 				"previous_cursor": 0,
 			}
@@ -182,8 +184,9 @@ func NewMockTwitterServer() *MockTwitterServer {
 
 		// v1.1 friends/ids.json
 		case r.Method == http.MethodGet && r.URL.Path == "/1.1/friends/ids.json":
+			idsCopy := append([]int64(nil), ms.FollowingIDs...)
 			resp := map[string]interface{}{
-				"ids":             ms.FollowingIDs,
+				"ids":             idsCopy,
 				"next_cursor":     0,
 				"previous_cursor": 0,
 			}
