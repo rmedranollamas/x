@@ -3,7 +3,7 @@ module github.com/rmedranollamas/x-agent
 go 1.23.0
 
 require (
-	github.com/caarlos0/env/v11 v11.3.1
+	github.com/caarlos0/env/v11 v11.4.1
 	github.com/cenkalti/backoff/v4 v4.3.0
 	github.com/dghubble/oauth1 v0.7.3
 	github.com/joho/godotenv v1.5.1
