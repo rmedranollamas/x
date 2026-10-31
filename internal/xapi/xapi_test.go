@@ -466,6 +466,265 @@ func TestXClient_UsersBatch_PartialErrors(t *testing.T) {
 	}
 }
 
+func TestXClient_UsersBatch_RealV2BatchErrors_PluralIDsAndHints(t *testing.T) {
+	mock := NewMockTransport()
+	mock.QueueResponse("GET", "/2/users", http.StatusOK, map[string]interface{}{
+		"data": []map[string]interface{}{
+			{"id": "101", "username": "active_user"},
+		},
+		"errors": []map[string]interface{}{
+			{
+				"resource_id": "998",
+				"parameter":   "ids",
+				"value":       "998",
+				"title":       "Not Found Error",
+				"detail":      "Could not find user with ids: [998].",
+			},
+			{
+				"resource_id": "999",
+				"parameter":   "ids",
+				"value":       "999",
+				"title":       "Forbidden",
+				"detail":      "User has been suspended: [999].",
+			},
+		},
+	}, nil)
+
+	// Queue 401 Unauthorized on users/show.json so ResolveUserFallback returns "(Unknown)" without transient retries.
+	mock.QueueResponse("GET", "/1.1/users/show.json", http.StatusUnauthorized, `{"errors":[{"code":32,"message":"Could not authenticate you."}]}`, nil)
+	mock.QueueResponse("GET", "/1.1/users/show.json", http.StatusUnauthorized, `{"errors":[{"code":32,"message":"Could not authenticate you."}]}`, nil)
+
+	client := newTestClient(mock)
+	result, err := client.GetUsersBatch(context.Background(), []int64{101, 998, 999})
+	if err != nil {
+		t.Fatalf("GetUsersBatch failed: %v", err)
+	}
+
+	if len(result) != 3 {
+		t.Fatalf("expected 3 user entries, got %d", len(result))
+	}
+	if result[101] == nil || result[101].Username != "active_user" || result[101].Status != "ACTIVE" {
+		t.Errorf("unexpected user 101: %+v", result[101])
+	}
+	if result[998] == nil || result[998].Status != "(Deactivated)" || result[998].Username != "(Deactivated)" {
+		t.Errorf("expected 998 to be '(Deactivated)', got %+v", result[998])
+	}
+	if result[999] == nil || result[999].Status != "(Suspended)" || result[999].Username != "(Suspended)" {
+		t.Errorf("expected 999 to be '(Suspended)', got %+v", result[999])
+	}
+}
+
+func TestXClient_UsersBatch_V2Forbidden_FallsBackToV1Lookup(t *testing.T) {
+	mock := NewMockTransport()
+	mock.QueueResponse("GET", "/2/users", http.StatusForbidden, `{"title":"Forbidden","detail":"When authenticating requests to the Twitter API v2 endpoints, you must use keys and tokens from a Twitter developer App that is attached to a Project."}`, nil)
+	mock.QueueResponse("GET", "/1.1/users/lookup.json", http.StatusOK, []map[string]interface{}{
+		{"id": 101, "id_str": "101", "name": "Alice", "screen_name": "v1_alice"},
+	}, nil)
+	mock.QueueResponse("GET", "/1.1/users/show.json", http.StatusNotFound, `{"errors":[{"code":50,"message":"User not found."}]}`, nil)
+
+	client := newTestClient(mock)
+	result, err := client.GetUsersBatch(context.Background(), []int64{101, 102})
+	if err != nil {
+		t.Fatalf("GetUsersBatch failed: %v", err)
+	}
+
+	if len(result) != 2 {
+		t.Fatalf("expected 2 user entries, got %d", len(result))
+	}
+	if result[101] == nil || result[101].Username != "v1_alice" || result[101].Status != "ACTIVE" {
+		t.Errorf("expected 101 username 'v1_alice' and status 'ACTIVE', got %+v", result[101])
+	}
+	if result[102] == nil || result[102].Status != "(Deactivated)" {
+		t.Errorf("expected 102 status '(Deactivated)', got %+v", result[102])
+	}
+}
+
+func TestXClient_UsersBatch_V2Forbidden_V1Lookup404AllDead(t *testing.T) {
+	mock := NewMockTransport()
+	mock.QueueResponse("GET", "/2/users", http.StatusForbidden, `{"title":"Forbidden"}`, nil)
+	mock.QueueResponse("GET", "/1.1/users/lookup.json", http.StatusNotFound, `{"errors":[{"code":17,"message":"No user matches for specified terms."}]}`, nil)
+	mock.QueueResponse("GET", "/1.1/users/show.json", http.StatusNotFound, `{"errors":[{"code":50,"message":"User not found."}]}`, nil)
+	mock.QueueResponse("GET", "/1.1/users/show.json", http.StatusForbidden, `{"errors":[{"code":63,"message":"User has been suspended."}]}`, nil)
+
+	client := newTestClient(mock)
+	result, err := client.GetUsersBatch(context.Background(), []int64{201, 202})
+	if err != nil {
+		t.Fatalf("GetUsersBatch failed: %v", err)
+	}
+
+	if len(result) != 2 {
+		t.Fatalf("expected 2 user entries, got %d", len(result))
+	}
+	if result[201] == nil || result[201].Status != "(Deactivated)" {
+		t.Errorf("expected 201 status '(Deactivated)', got %+v", result[201])
+	}
+	if result[202] == nil || result[202].Status != "(Suspended)" {
+		t.Errorf("expected 202 status '(Suspended)', got %+v", result[202])
+	}
+}
+
+func TestXClient_UsersBatch_V2AndV1Unreachable_CircuitBreaker(t *testing.T) {
+	mock := NewMockTransport()
+	mock.QueueResponse("GET", "/2/users", http.StatusUnauthorized, `{"title":"Unauthorized"}`, nil)
+	mock.QueueResponse("GET", "/1.1/users/lookup.json", http.StatusUnauthorized, `{"errors":[{"code":32}]}`, nil)
+	// Only 1 show.json call should happen before circuit breaker trips for remaining IDs in chunk
+	mock.QueueResponse("GET", "/1.1/users/show.json", http.StatusUnauthorized, `{"errors":[{"code":32}]}`, nil)
+
+	client := newTestClient(mock)
+	result, err := client.GetUsersBatch(context.Background(), []int64{301, 302, 303})
+	if err != nil {
+		t.Fatalf("GetUsersBatch failed: %v", err)
+	}
+
+	if len(result) != 3 {
+		t.Fatalf("expected 3 user entries, got %d", len(result))
+	}
+	for _, id := range []int64{301, 302, 303} {
+		if result[id] == nil || result[id].Status != "(Unknown)" || result[id].Username != "(Unknown)" {
+			t.Errorf("expected %d to be '(Unknown)', got %+v", id, result[id])
+		}
+	}
+	if got := mock.RequestCount("GET", "/1.1/users/show.json"); got != 1 {
+		t.Errorf("expected circuit breaker to stop after 1 show.json call, got %d", got)
+	}
+}
+
+func TestXClient_UsersBatch_V1Show403TierError_PreservesHintsAndTripsCircuitBreaker(t *testing.T) {
+	tier403Body := `{"errors":[{"code":453,"message":"You currently have access to a subset of Twitter API v2 endpoints and limited v1.1 endpoints (e.g. media post, oauth) only."}]}`
+
+	t.Run("preserves_v2_errHints_when_v1_show_returns_403_code_453", func(t *testing.T) {
+		mock := NewMockTransport()
+		mock.QueueResponse("GET", "/2/users", http.StatusOK, map[string]interface{}{
+			"data": []map[string]interface{}{
+				{"id": "101", "username": "active_user"},
+			},
+			"errors": []map[string]interface{}{
+				{
+					"resource_id": "998",
+					"parameter":   "ids",
+					"value":       "998",
+					"title":       "Not Found Error",
+					"detail":      "Could not find user with ids: [998].",
+				},
+			},
+		}, nil)
+		mock.QueueResponse("GET", "/1.1/users/show.json", http.StatusForbidden, tier403Body, nil)
+
+		client := newTestClient(mock)
+		result, err := client.GetUsersBatch(context.Background(), []int64{101, 998})
+		if err != nil {
+			t.Fatalf("GetUsersBatch failed: %v", err)
+		}
+		if result[998] == nil || result[998].Status != "(Deactivated)" || result[998].Username != "(Deactivated)" {
+			t.Errorf("expected 998 to preserve '(Deactivated)' hint instead of '(Suspended)', got %+v", result[998])
+		}
+	})
+
+	t.Run("trips_circuit_breaker_when_v2_and_v1_return_403_code_453", func(t *testing.T) {
+		mock := NewMockTransport()
+		mock.QueueResponse("GET", "/2/users", http.StatusForbidden, tier403Body, nil)
+		mock.QueueResponse("GET", "/1.1/users/lookup.json", http.StatusForbidden, tier403Body, nil)
+		mock.QueueResponse("GET", "/1.1/users/show.json", http.StatusForbidden, tier403Body, nil)
+
+		client := newTestClient(mock)
+		result, err := client.GetUsersBatch(context.Background(), []int64{301, 302, 303})
+		if err != nil {
+			t.Fatalf("GetUsersBatch failed: %v", err)
+		}
+		for _, id := range []int64{301, 302, 303} {
+			if result[id] == nil || result[id].Status != "(Unknown)" || result[id].Username != "(Unknown)" {
+				t.Errorf("expected %d to be '(Unknown)', got %+v", id, result[id])
+			}
+		}
+		if got := mock.RequestCount("GET", "/1.1/users/show.json"); got != 1 {
+			t.Errorf("expected circuit breaker to stop after 1 show.json call, got %d", got)
+		}
+	})
+
+	t.Run("bare_empty_403_still_classifies_as_suspended", func(t *testing.T) {
+		mock := NewMockTransport()
+		mock.QueueResponse("GET", "/2/users", http.StatusForbidden, tier403Body, nil)
+		mock.QueueResponse("GET", "/1.1/users/lookup.json", http.StatusNotFound, `{"errors":[{"code":17}]}`, nil)
+		mock.QueueResponse("GET", "/1.1/users/show.json", http.StatusForbidden, "", nil)
+
+		client := newTestClient(mock)
+		result, err := client.GetUsersBatch(context.Background(), []int64{401})
+		if err != nil {
+			t.Fatalf("GetUsersBatch failed: %v", err)
+		}
+		if result[401] == nil || result[401].Status != "(Suspended)" {
+			t.Errorf("expected bare 403 to classify 401 as '(Suspended)', got %+v", result[401])
+		}
+	})
+}
+
+func TestXClient_UsersBatch_DetailBracketExtractionAndParameterGuard(t *testing.T) {
+	mock := NewMockTransport()
+	mock.QueueResponse("GET", "/2/users", http.StatusOK, map[string]interface{}{
+		"data": []map[string]interface{}{},
+		"errors": []map[string]interface{}{
+			{
+				"resource_id": "",
+				"parameter":   "user.fields",
+				"value":       "12345",
+				"title":       "Forbidden",
+				"detail":      "Error [invalid] for user [997]: User has been suspended.",
+			},
+		},
+	}, nil)
+	mock.QueueResponse("GET", "/1.1/users/show.json", http.StatusUnauthorized, `{"errors":[{"code":32}]}`, nil)
+
+	client := newTestClient(mock)
+	result, err := client.GetUsersBatch(context.Background(), []int64{997})
+	if err != nil {
+		t.Fatalf("GetUsersBatch failed: %v", err)
+	}
+	if result[997] == nil || result[997].Status != "(Suspended)" || result[997].Username != "(Suspended)" {
+		t.Errorf("expected 997 to be '(Suspended)' via detail [997] extraction, got %+v", result[997])
+	}
+	if _, exists := result[12345]; exists {
+		t.Errorf("did not expect non-id parameter value 12345 in result")
+	}
+}
+
+func TestXClient_UsersBatch_DeduplicatesIDsUpfront(t *testing.T) {
+	mock := NewMockTransport()
+	mock.QueueResponse("GET", "/2/users", http.StatusOK, map[string]interface{}{
+		"data": []map[string]interface{}{
+			{"id": "101", "username": "u101"},
+			{"id": "102", "username": "u102"},
+		},
+	}, nil)
+
+	client := newTestClient(mock)
+	result, err := client.GetUsersBatch(context.Background(), []int64{101, 102, 101})
+	if err != nil {
+		t.Fatalf("GetUsersBatch failed: %v", err)
+	}
+	if len(result) != 2 {
+		t.Fatalf("expected 2 unique users in result, got %d", len(result))
+	}
+	if len(mock.requests) != 1 {
+		t.Fatalf("expected 1 HTTP request, got %d", len(mock.requests))
+	}
+	if gotIDs := mock.requests[0].URL.Query().Get("ids"); gotIDs != "101,102" {
+		t.Errorf("expected wire query ids='101,102', got %q", gotIDs)
+	}
+}
+
+func TestXClient_UsersBatch_ContextCanceled(t *testing.T) {
+	mock := NewMockTransport()
+	client := newTestClient(mock)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	result, err := client.GetUsersBatch(ctx, []int64{101, 102})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled error, got err=%v result=%+v", err, result)
+	}
+}
+
 func TestXClient_UserTimeline_MaxIDPagination(t *testing.T) {
 	mock := NewMockTransport()
 	mock.QueueResponse("GET", "/1.1/statuses/user_timeline.json", http.StatusOK, []map[string]interface{}{

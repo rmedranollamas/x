@@ -32,7 +32,7 @@ func setupTestDB(t *testing.T) (*db.DBManager, string) {
 	return mgr, dbPath
 }
 
-// 1. Test clean database migration from version 0 to 4
+// 1. Test clean database migration from version 0 to 5
 func TestMigrations_FreshDatabase(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "fresh.db")
@@ -53,8 +53,8 @@ func TestMigrations_FreshDatabase(t *testing.T) {
 		t.Fatalf("GetAppliedVersions failed: %v", err)
 	}
 
-	if len(versions) != 4 {
-		t.Fatalf("expected 4 applied migrations, got %d", len(versions))
+	if len(versions) != 5 {
+		t.Fatalf("expected 5 applied migrations, got %d", len(versions))
 	}
 
 	expectedDescriptions := map[int]string{
@@ -62,6 +62,7 @@ func TestMigrations_FreshDatabase(t *testing.T) {
 		2: "Add listed_count column to insights table.",
 		3: "Create deleted_tweets table for audit logging.",
 		4: "Rename views column to engagement_score in deleted_tweets table.",
+		5: "Add username column to followers table for handle caching.",
 	}
 
 	for _, v := range versions {
@@ -105,6 +106,13 @@ func TestMigrations_FreshDatabase(t *testing.T) {
 	if !errors.Is(err, sql.ErrNoRows) {
 		t.Errorf("column views should have been renamed: %v", err)
 	}
+
+	// Verify column username in followers
+	var followerUsernameCol string
+	err = mgr.DB().QueryRowContext(ctx, "SELECT name FROM pragma_table_info('followers') WHERE name='username'").Scan(&followerUsernameCol)
+	if err != nil {
+		t.Errorf("column username missing in followers: %v", err)
+	}
 }
 
 // 2. Test migration idempotency (0 backups, 0 errors, 0 changes on second run)
@@ -126,14 +134,14 @@ func TestMigrations_Idempotency(t *testing.T) {
 		t.Fatalf("expected %d backups, found %d", len(initialBackups), len(secondBackups))
 	}
 
-	// Verify schema_versions count remains 4
+	// Verify schema_versions count remains 5
 	ctx := context.Background()
 	versions, err := mgr.GetAppliedVersions(ctx)
 	if err != nil {
 		t.Fatalf("GetAppliedVersions failed: %v", err)
 	}
-	if len(versions) != 4 {
-		t.Fatalf("expected 4 applied migrations, got %d", len(versions))
+	if len(versions) != 5 {
+		t.Fatalf("expected 5 applied migrations, got %d", len(versions))
 	}
 }
 
@@ -545,6 +553,69 @@ func TestFollowers_ReplaceAtomic(t *testing.T) {
 	}
 	if len(ids) != 2 || ids[0] != 401 || ids[1] != 402 {
 		t.Errorf("expected [401, 402], got %+v", ids)
+	}
+}
+
+// 8b. Test Followers Username Caching and Preservation across ReplaceFollowers
+func TestFollowers_UsernameCachingAndPreservation(t *testing.T) {
+	mgr, _ := setupTestDB(t)
+	defer mgr.Close()
+	ctx := context.Background()
+
+	if err := mgr.ReplaceFollowers(ctx, []int64{101, 102, 103}); err != nil {
+		t.Fatalf("initial ReplaceFollowers failed: %v", err)
+	}
+
+	// Empty map and status-only map must be clean no-ops
+	if err := mgr.UpsertFollowerUsernames(ctx, nil); err != nil {
+		t.Fatalf("UpsertFollowerUsernames(nil) failed: %v", err)
+	}
+	if err := mgr.UpsertFollowerUsernames(ctx, map[int64]string{
+		101: "   ",
+		102: "@",
+		103: "(Suspended)",
+	}); err != nil {
+		t.Fatalf("UpsertFollowerUsernames(only invalid) failed: %v", err)
+	}
+
+	// Upsert valid handles, @-prefixed handle, status marker, and non-follower ID
+	if err := mgr.UpsertFollowerUsernames(ctx, map[int64]string{
+		101: "alice",
+		102: "@bob",
+		103: "(Deactivated)",
+		999: "not_a_follower",
+	}); err != nil {
+		t.Fatalf("UpsertFollowerUsernames failed: %v", err)
+	}
+
+	usernames, err := mgr.GetFollowerUsernames(ctx)
+	if err != nil {
+		t.Fatalf("GetFollowerUsernames failed: %v", err)
+	}
+	if len(usernames) != 2 || usernames[101] != "alice" || usernames[102] != "bob" {
+		t.Fatalf("expected {101: \"alice\", 102: \"bob\"}, got %+v", usernames)
+	}
+
+	// Subsequent ReplaceFollowers preserves 102 -> "bob", drops unfollowed 101,
+	// keeps 103 & 104 without spurious usernames, and tolerates duplicate IDs.
+	if err := mgr.ReplaceFollowers(ctx, []int64{102, 103, 104, 102}); err != nil {
+		t.Fatalf("second ReplaceFollowers failed: %v", err)
+	}
+
+	ids, err := mgr.GetFollowerIDs(ctx)
+	if err != nil {
+		t.Fatalf("GetFollowerIDs failed: %v", err)
+	}
+	if len(ids) != 3 || ids[0] != 102 || ids[1] != 103 || ids[2] != 104 {
+		t.Fatalf("expected follower IDs [102, 103, 104], got %+v", ids)
+	}
+
+	usernamesAfter, err := mgr.GetFollowerUsernames(ctx)
+	if err != nil {
+		t.Fatalf("GetFollowerUsernames after replace failed: %v", err)
+	}
+	if len(usernamesAfter) != 1 || usernamesAfter[102] != "bob" {
+		t.Fatalf("expected preserved {102: \"bob\"}, got %+v", usernamesAfter)
 	}
 }
 

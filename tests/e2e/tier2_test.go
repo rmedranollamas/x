@@ -183,9 +183,78 @@ func TestTier2_Insights_DeactivatedFollowerHandle(t *testing.T) {
 	if res.ExitCode != 0 {
 		t.Fatalf("expected exit code 0, got %d", res.ExitCode)
 	}
-	combined := res.Stdout + res.Stderr
-	if !strings.Contains(combined, "Deactivated") && !strings.Contains(combined, "9002") {
-		t.Logf("Notice: expected (Deactivated) fallback handle for 9002, got:\n%s", combined)
+	if !strings.Contains(res.Stdout, "1 deleted account") {
+		t.Errorf("expected '1 deleted account' summary in stdout, got:\n%s", res.Stdout)
+	}
+	if strings.Contains(res.Stdout, "9002") {
+		t.Errorf("expected stdout not to contain raw numeric ID 9002, got:\n%s", res.Stdout)
+	}
+}
+
+func TestTier2_Insights_UsernamesAndDeletedCounts_EndToEnd(t *testing.T) {
+	tc := NewTestContext(t)
+	tc.InitDBWithSchema()
+
+	// Run 1: Baseline run caches handles for 6101, 6102, 6103
+	tc.MockServer.Mu.Lock()
+	tc.MockServer.FollowerIDs = []int64{6101, 6102, 6103}
+	tc.MockServer.FollowersCount = 3
+	tc.MockServer.Mu.Unlock()
+
+	res1 := tc.MustRun("insights")
+	if res1.ExitCode != 0 {
+		t.Fatalf("expected exit code 0 on run 1, got %d", res1.ExitCode)
+	}
+
+	// Verify Run 1 cached handles in SQLite
+	cachedHandle, err := tc.QueryDB(tc.DBPath, "SELECT username FROM followers WHERE user_id = 6103;")
+	if err != nil || cachedHandle != "handle_6103" {
+		t.Fatalf("expected cached username 'handle_6103' in followers table, got %q (err: %v)", cachedHandle, err)
+	}
+
+	// Simulate two uncached legacy followers (6201, 6202) already in SQLite
+	_, err = tc.QueryDB(tc.DBPath, "INSERT INTO followers (user_id, username) VALUES (6201, ''), (6202, '');")
+	if err != nil {
+		t.Fatalf("failed to seed uncached legacy followers: %v", err)
+	}
+
+	// Before Run 2:
+	// - 6101 remains a follower
+	// - 6301 is a new active follower (+ @handle_6301)
+	// - 6102 unfollowed while still active (- @handle_6102)
+	// - 6103 was cached and is now deleted (- @handle_6103 (deleted))
+	// - 6201 & 6202 were uncached and are now deleted (- 2 deleted accounts)
+	tc.MockServer.Mu.Lock()
+	tc.MockServer.FollowerIDs = []int64{6101, 6301}
+	tc.MockServer.FollowersCount = 2
+	tc.MockServer.UnblockErrors[6103] = http.StatusNotFound
+	tc.MockServer.UnblockErrors[6201] = http.StatusNotFound
+	tc.MockServer.UnblockErrors[6202] = http.StatusNotFound
+	tc.MockServer.Mu.Unlock()
+
+	res2 := tc.MustRun("insights")
+	if res2.ExitCode != 0 {
+		t.Fatalf("expected exit code 0 on run 2, got %d", res2.ExitCode)
+	}
+
+	for _, exp := range []string{
+		" + @handle_6301",
+		" - @handle_6102",
+		" - @handle_6103 (deleted)",
+		" - 2 deleted accounts",
+	} {
+		if !strings.Contains(res2.Stdout, exp) {
+			t.Errorf("expected %q in run 2 stdout, got:\n%s", exp, res2.Stdout)
+		}
+	}
+
+	if strings.Contains(res2.Stdout, "ID:") {
+		t.Errorf("expected zero 'ID:' substrings in stdout, got:\n%s", res2.Stdout)
+	}
+	for _, rawID := range []string{"6201", "6202", "ID: 6102", "ID: 6103", "ID: 6301"} {
+		if strings.Contains(res2.Stdout, rawID) {
+			t.Errorf("stdout leaked raw numeric ID %q:\n%s", rawID, res2.Stdout)
+		}
 	}
 }
 
@@ -193,9 +262,12 @@ func TestTier2_Insights_SuspendedFollowerHandle(t *testing.T) {
 	tc := NewTestContext(t)
 	tc.InitDBWithSchema()
 
+	// Seed previous followers
+	_, _ = tc.QueryDB(tc.DBPath, "INSERT INTO followers (user_id) VALUES (9001);")
+
 	// Follower 9003 is new, resolving it gives 403 Forbidden
 	tc.MockServer.Mu.Lock()
-	tc.MockServer.FollowerIDs = []int64{9003}
+	tc.MockServer.FollowerIDs = []int64{9001, 9003}
 	tc.MockServer.UnblockErrors[9003] = http.StatusForbidden
 	tc.MockServer.Mu.Unlock()
 
@@ -203,9 +275,11 @@ func TestTier2_Insights_SuspendedFollowerHandle(t *testing.T) {
 	if res.ExitCode != 0 {
 		t.Fatalf("expected exit code 0, got %d", res.ExitCode)
 	}
-	combined := res.Stdout + res.Stderr
-	if !strings.Contains(combined, "Suspended") && !strings.Contains(combined, "9003") {
-		t.Logf("Notice: expected (Suspended) fallback handle for 9003, got:\n%s", combined)
+	if !strings.Contains(res.Stdout, "1 suspended account") {
+		t.Errorf("expected '1 suspended account' summary in stdout, got:\n%s", res.Stdout)
+	}
+	if strings.Contains(res.Stdout, "9003") {
+		t.Errorf("expected stdout not to contain raw numeric ID 9003, got:\n%s", res.Stdout)
 	}
 }
 

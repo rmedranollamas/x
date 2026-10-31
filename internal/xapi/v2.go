@@ -102,6 +102,34 @@ func (c *Client) GetMe(ctx context.Context) (*User, error) {
 	return user, nil
 }
 
+// isForbiddenSuspended checks whether an HTTP 403 from v1.1 users/show.json represents
+// a genuinely suspended account (code 63) rather than an API tier/access error (e.g. code 453).
+func isForbiddenSuspended(body []byte, err error) bool {
+	if len(bytes.TrimSpace(body)) == 0 {
+		return true
+	}
+	if strings.Contains(strings.ToLower(string(body)), "suspended") {
+		return true
+	}
+	var fbErr *ForbiddenError
+	if errors.As(err, &fbErr) && fbErr.ErrorCode == 63 {
+		return true
+	}
+	var errPayload struct {
+		Errors []struct {
+			Code int `json:"code"`
+		} `json:"errors"`
+	}
+	if json.Unmarshal(body, &errPayload) == nil {
+		for _, e := range errPayload.Errors {
+			if e.Code == 63 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // ResolveUserFallback attempts to resolve a user handle via v1.1 or returns their status.
 func (c *Client) ResolveUserFallback(ctx context.Context, userID int64) string {
 	resp, body, err := c.V1GetUser(ctx, userID)
@@ -119,27 +147,83 @@ func (c *Client) ResolveUserFallback(ctx context.Context, userID int64) string {
 		if resp.StatusCode == http.StatusNotFound {
 			return "(Deactivated)"
 		}
-		if resp.StatusCode == http.StatusForbidden {
+		if resp.StatusCode == http.StatusForbidden && isForbiddenSuspended(body, err) {
 			return "(Suspended)"
 		}
 	}
 	return "(Unknown)"
 }
 
+// extractMissingUserID extracts a user ID from a v2 partial batch error entry.
+func extractMissingUserID(resourceID, parameter, value, detail string) int64 {
+	if resourceID != "" {
+		if id, err := strconv.ParseInt(strings.TrimSpace(resourceID), 10, 64); err == nil && id != 0 {
+			return id
+		}
+	}
+	if value != "" && (parameter == "" || parameter == "id" || parameter == "ids") {
+		if id, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64); err == nil && id != 0 {
+			return id
+		}
+	}
+	rem := detail
+	for {
+		start := strings.IndexByte(rem, '[')
+		if start == -1 {
+			break
+		}
+		end := strings.IndexByte(rem[start+1:], ']')
+		if end == -1 {
+			break
+		}
+		candidate := strings.TrimSpace(rem[start+1 : start+1+end])
+		if candidate != "" {
+			allDigits := true
+			for i := 0; i < len(candidate); i++ {
+				if candidate[i] < '0' || candidate[i] > '9' {
+					allDigits = false
+					break
+				}
+			}
+			if allDigits {
+				if id, err := strconv.ParseInt(candidate, 10, 64); err == nil && id != 0 {
+					return id
+				}
+			}
+		}
+		rem = rem[start+1:]
+	}
+	return 0
+}
+
 // GetUsersBatch fetches user details for a slice of user IDs using v2 /2/users, chunking in batches of up to 100.
 func (c *Client) GetUsersBatch(ctx context.Context, userIDs []int64) (map[int64]*User, error) {
-	result := make(map[int64]*User, len(userIDs))
 	if len(userIDs) == 0 {
-		return result, nil
+		return make(map[int64]*User), nil
 	}
 
-	const chunkSize = 100
-	for i := 0; i < len(userIDs); i += chunkSize {
-		end := i + chunkSize
-		if end > len(userIDs) {
-			end = len(userIDs)
+	uniqueIDs := make([]int64, 0, len(userIDs))
+	seen := make(map[int64]struct{}, len(userIDs))
+	for _, id := range userIDs {
+		if _, exists := seen[id]; !exists {
+			seen[id] = struct{}{}
+			uniqueIDs = append(uniqueIDs, id)
 		}
-		chunk := userIDs[i:end]
+	}
+
+	result := make(map[int64]*User, len(uniqueIDs))
+
+	const chunkSize = 100
+	for i := 0; i < len(uniqueIDs); i += chunkSize {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+
+		end := i + chunkSize
+		if end > len(uniqueIDs) {
+			end = len(uniqueIDs)
+		}
+		chunk := uniqueIDs[i:end]
 
 		idStrs := make([]string, len(chunk))
 		for idx, id := range chunk {
@@ -158,16 +242,67 @@ func (c *Client) GetUsersBatch(ctx context.Context, userIDs []int64) (map[int64]
 		var resp struct {
 			Data   []v2UserData `json:"data"`
 			Errors []struct {
-				Parameter string `json:"parameter"`
-				Value     string `json:"value"`
-				Detail    string `json:"detail"`
-				Title     string `json:"title"`
-				Type      string `json:"type"`
+				ResourceID string `json:"resource_id"`
+				Parameter  string `json:"parameter"`
+				Value      string `json:"value"`
+				Detail     string `json:"detail"`
+				Title      string `json:"title"`
+				Type       string `json:"type"`
 			} `json:"errors"`
 		}
 
 		if err := c.executeJSON(ctx, "GET /2/users", reqFactory, &resp); err != nil {
-			logging.Warnf("Error fetching users for chunk starting at %d: %v", i, err)
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return nil, ctxErr
+			}
+			logging.Warnf("Error fetching users for chunk starting at %d: %v; falling back to v1.1 lookup", i, err)
+			v1Users, reachable, v1Err := c.v1LookupUsersChunk(ctx, chunk)
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return nil, ctxErr
+			}
+			if v1Err != nil {
+				logging.Warnf("v1.1 batch user lookup failed for chunk starting at %d: %v", i, v1Err)
+			}
+			for id, u := range v1Users {
+				result[id] = u
+			}
+			for idx, id := range chunk {
+				if result[id] != nil {
+					continue
+				}
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					return nil, ctxErr
+				}
+				fallbackStatus := c.ResolveUserFallback(ctx, id)
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					return nil, ctxErr
+				}
+				status := "ACTIVE"
+				if strings.HasPrefix(fallbackStatus, "(") {
+					status = fallbackStatus
+				}
+				result[id] = &User{
+					ID:       id,
+					IDStr:    strconv.FormatInt(id, 10),
+					Username: fallbackStatus,
+					Name:     fallbackStatus,
+					Status:   status,
+				}
+				if !reachable && fallbackStatus == "(Unknown)" {
+					for _, remID := range chunk[idx+1:] {
+						if result[remID] == nil {
+							result[remID] = &User{
+								ID:       remID,
+								IDStr:    strconv.FormatInt(remID, 10),
+								Username: "(Unknown)",
+								Name:     "(Unknown)",
+								Status:   "(Unknown)",
+							}
+						}
+					}
+					break
+				}
+			}
 			continue
 		}
 
@@ -176,27 +311,44 @@ func (c *Client) GetUsersBatch(ctx context.Context, userIDs []int64) (map[int64]
 			result[user.ID] = user
 		}
 
+		errHints := make(map[int64]string, len(resp.Errors))
 		for _, errItem := range resp.Errors {
-			var missingID int64
-			if errItem.Parameter == "id" && errItem.Value != "" {
-				missingID, _ = strconv.ParseInt(errItem.Value, 10, 64)
-			} else if strings.Contains(errItem.Detail, "Could not find user with id [") {
-				start := strings.Index(errItem.Detail, "[")
-				end := strings.Index(errItem.Detail, "]")
-				if start != -1 && end != -1 && end > start {
-					missingID, _ = strconv.ParseInt(errItem.Detail[start+1:end], 10, 64)
-				}
+			missingID := extractMissingUserID(errItem.ResourceID, errItem.Parameter, errItem.Value, errItem.Detail)
+			if missingID == 0 {
+				continue
 			}
+			combined := strings.ToLower(errItem.Detail + " " + errItem.Title)
+			if strings.Contains(combined, "suspended") {
+				errHints[missingID] = "(Suspended)"
+			} else if strings.Contains(combined, "not find user") || strings.Contains(combined, "not found") {
+				errHints[missingID] = "(Deactivated)"
+			}
+		}
 
-			if missingID != 0 {
-				fallbackStatus := c.ResolveUserFallback(ctx, missingID)
-				result[missingID] = &User{
-					ID:       missingID,
-					IDStr:    strconv.FormatInt(missingID, 10),
-					Username: fallbackStatus,
-					Name:     fallbackStatus,
-					Status:   fallbackStatus,
-				}
+		for _, id := range chunk {
+			if result[id] != nil {
+				continue
+			}
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return nil, ctxErr
+			}
+			fallbackStatus := c.ResolveUserFallback(ctx, id)
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return nil, ctxErr
+			}
+			if fallbackStatus == "(Unknown)" && errHints[id] != "" {
+				fallbackStatus = errHints[id]
+			}
+			status := "ACTIVE"
+			if strings.HasPrefix(fallbackStatus, "(") {
+				status = fallbackStatus
+			}
+			result[id] = &User{
+				ID:       id,
+				IDStr:    strconv.FormatInt(id, 10),
+				Username: fallbackStatus,
+				Name:     fallbackStatus,
+				Status:   status,
 			}
 		}
 	}

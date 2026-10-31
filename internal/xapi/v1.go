@@ -286,3 +286,73 @@ func (c *Client) V1GetUser(ctx context.Context, targetUserID int64) (*http.Respo
 	}
 	return c.executeRequest(ctx, "GET /1.1/users/show.json", reqFactory)
 }
+
+// v1LookupUsersChunk resolves a batch of up to 100 user IDs via GET /1.1/users/lookup.json.
+func (c *Client) v1LookupUsersChunk(ctx context.Context, chunk []int64) (users map[int64]*User, reachable bool, err error) {
+	if len(chunk) == 0 {
+		return make(map[int64]*User), true, nil
+	}
+
+	idStrs := make([]string, len(chunk))
+	for idx, id := range chunk {
+		idStrs[idx] = strconv.FormatInt(id, 10)
+	}
+	csv := strings.Join(idStrs, ",")
+
+	reqFactory := func() (*http.Request, error) {
+		query := url.Values{}
+		query.Set("user_id", csv)
+		query.Set("include_entities", "false")
+		reqURL := fmt.Sprintf("%s/1.1/users/lookup.json?%s", c.baseURL, query.Encode())
+		return http.NewRequest(http.MethodGet, reqURL, nil)
+	}
+
+	resp, body, reqErr := c.executeRequest(ctx, "GET /1.1/users/lookup.json", reqFactory)
+	if reqErr == nil && resp != nil && resp.StatusCode == http.StatusOK {
+		var rawUsers []struct {
+			ID         int64  `json:"id"`
+			IDStr      string `json:"id_str"`
+			Name       string `json:"name"`
+			ScreenName string `json:"screen_name"`
+		}
+		if unmarshalErr := json.Unmarshal(body, &rawUsers); unmarshalErr != nil {
+			return nil, false, fmt.Errorf("failed to decode v1 users/lookup response: %w", unmarshalErr)
+		}
+
+		users = make(map[int64]*User, len(rawUsers))
+		for _, u := range rawUsers {
+			id := u.ID
+			if id == 0 && u.IDStr != "" {
+				id, _ = strconv.ParseInt(u.IDStr, 10, 64)
+			}
+			if id == 0 || u.ScreenName == "" {
+				continue
+			}
+			idStr := u.IDStr
+			if idStr == "" {
+				idStr = strconv.FormatInt(id, 10)
+			}
+			users[id] = &User{
+				ID:       id,
+				IDStr:    idStr,
+				Username: u.ScreenName,
+				Name:     u.Name,
+				Status:   "ACTIVE",
+			}
+		}
+		return users, true, nil
+	}
+
+	if resp != nil && resp.StatusCode == http.StatusNotFound {
+		// Twitter v1.1 /1.1/users/lookup.json returns HTTP 404 (code 17) when all requested IDs are deactivated or suspended.
+		return make(map[int64]*User), true, nil
+	}
+
+	if reqErr != nil {
+		return nil, false, reqErr
+	}
+	if resp != nil {
+		return nil, false, fmt.Errorf("unexpected status %d from GET /1.1/users/lookup.json", resp.StatusCode)
+	}
+	return nil, false, fmt.Errorf("no response from GET /1.1/users/lookup.json")
+}

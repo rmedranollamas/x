@@ -19,6 +19,7 @@ var defaultRegistry = []Migration{
 	&m002AddListedCount{},
 	&m003CreateDeletedTweets{},
 	&m004RenameViewsToEngagement{},
+	&m005AddFollowerUsername{},
 }
 
 // RunMigrations executes all pending migrations sequentially within a single transaction.
@@ -169,7 +170,7 @@ func ensureColumn(ctx context.Context, tx *sql.Tx, table, column, colDef string)
 }
 
 // ----------------------------------------------------------------------------
-// Concrete Migrations: m001 - m004
+// Concrete Migrations: m001 - m005
 // ----------------------------------------------------------------------------
 
 // m001Initial creates initial schema and handles legacy column backfills & cleanups.
@@ -329,4 +330,16 @@ func (m *m004RenameViewsToEngagement) Up(ctx context.Context, tx *sql.Tx) error 
 		}
 	}
 	return nil
+}
+
+// m005AddFollowerUsername adds username column to followers table for handle caching.
+type m005AddFollowerUsername struct{}
+
+func (m *m005AddFollowerUsername) Version() int { return 5 }
+func (m *m005AddFollowerUsername) Description() string {
+	return "Add username column to followers table for handle caching."
+}
+
+func (m *m005AddFollowerUsername) Up(ctx context.Context, tx *sql.Tx) error {
+	return ensureColumn(ctx, tx, "followers", "username", "TEXT DEFAULT ''")
 }
