@@ -122,9 +122,10 @@ type mockDB struct {
 	updatedUserStatuses  map[int64]string
 	batchUpdatedStatuses map[string][]int64
 
-	followerIDs      []int64
-	replacedFollower []int64
-	loggedUnfollows  []int64
+	followerIDs       []int64
+	followerUsernames map[int64]string
+	replacedFollower  []int64
+	loggedUnfollows   []int64
 
 	latestInsight  *db.Insight
 	offsetInsights map[int]*db.Insight
@@ -138,6 +139,7 @@ func newMockDB() *mockDB {
 	return &mockDB{
 		updatedUserStatuses:  make(map[int64]string),
 		batchUpdatedStatuses: make(map[string][]int64),
+		followerUsernames:    make(map[int64]string),
 		offsetInsights:       make(map[int]*db.Insight),
 		deletedTweetIDs:      make(map[int64]bool),
 	}
@@ -202,8 +204,50 @@ func (m *mockDB) GetFollowerIDs(ctx context.Context) ([]int64, error) {
 func (m *mockDB) ReplaceFollowers(ctx context.Context, followerIDs []int64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	retained := make(map[int64]string)
+	for _, id := range followerIDs {
+		if uname := m.followerUsernames[id]; uname != "" {
+			retained[id] = uname
+		}
+	}
+	m.followerUsernames = retained
 	m.replacedFollower = followerIDs
 	m.followerIDs = followerIDs
+	return nil
+}
+
+func (m *mockDB) GetFollowerUsernames(ctx context.Context) (map[int64]string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	res := make(map[int64]string, len(m.followerUsernames))
+	for uid, uname := range m.followerUsernames {
+		if uname != "" {
+			res[uid] = uname
+		}
+	}
+	return res, nil
+}
+
+func (m *mockDB) UpsertFollowerUsernames(ctx context.Context, usernames map[int64]string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.followerUsernames == nil {
+		m.followerUsernames = make(map[int64]string)
+	}
+	followerSet := make(map[int64]bool, len(m.followerIDs))
+	for _, id := range m.followerIDs {
+		followerSet[id] = true
+	}
+	for uid, handle := range usernames {
+		if !followerSet[uid] {
+			continue
+		}
+		clean := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(handle), "@"))
+		if clean == "" || strings.HasPrefix(clean, "(") {
+			continue
+		}
+		m.followerUsernames[uid] = clean
+	}
 	return nil
 }
 
@@ -558,6 +602,350 @@ func TestInsightsAgent_EmailDelivery(t *testing.T) {
 
 	if !emailDelivered {
 		t.Errorf("expected email to be delivered when --email is enabled")
+	}
+}
+
+func TestInsightsAgent_ActiveHandlesSortedAlphabetically(t *testing.T) {
+	ctx := context.Background()
+	handles := map[int64]string{
+		100: "staying",
+		200: "charlie",
+		300: "Bob",
+		400: "Zoe",
+		500: "@alice",
+	}
+
+	client := &mockXClient{
+		getFollowerIDsFunc: func(ctx context.Context) ([]int64, error) {
+			return []int64{100, 400, 500}, nil
+		},
+		getUsersBatchFunc: func(ctx context.Context, userIDs []int64) (map[int64]*xapi.User, error) {
+			res := make(map[int64]*xapi.User, len(userIDs))
+			for _, id := range userIDs {
+				if h, ok := handles[id]; ok {
+					res[id] = &xapi.User{ID: id, Username: h}
+				}
+			}
+			return res, nil
+		},
+	}
+
+	mockDatabase := newMockDB()
+	mockDatabase.followerIDs = []int64{100, 200, 300}
+
+	var outBuf bytes.Buffer
+	agent := agents.NewInsightsAgent(client, mockDatabase, &config.Config{Environment: "development"}, agents.InsightsOptions{}, &outBuf)
+	if err := agent.Run(ctx); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	report := agent.Report()
+	if strings.Contains(report, "ID:") {
+		t.Errorf("report must never contain raw 'ID:', got:\n%s", report)
+	}
+	for _, rawID := range []string{"200", "300", "400", "500"} {
+		// Check follower log lines don't leak numeric IDs
+		if strings.Contains(report, "+ "+rawID) || strings.Contains(report, "- "+rawID) || strings.Contains(report, "ID: "+rawID) {
+			t.Errorf("report leaked numeric follower ID %s:\n%s", rawID, report)
+		}
+	}
+
+	idxAlice := strings.Index(report, " + @alice")
+	idxZoe := strings.Index(report, " + @Zoe")
+	if idxAlice == -1 || idxZoe == -1 {
+		t.Fatalf("expected '+ @alice' and '+ @Zoe' in report, got:\n%s", report)
+	}
+	if idxAlice > idxZoe {
+		t.Errorf("expected '+ @alice' to appear before '+ @Zoe', got:\n%s", report)
+	}
+
+	idxBob := strings.Index(report, " - @Bob")
+	idxCharlie := strings.Index(report, " - @charlie")
+	if idxBob == -1 || idxCharlie == -1 {
+		t.Fatalf("expected '- @Bob' and '- @charlie' in report, got:\n%s", report)
+	}
+	if idxBob > idxCharlie {
+		t.Errorf("expected '- @Bob' to appear before '- @charlie', got:\n%s", report)
+	}
+}
+
+func TestInsightsAgent_UnnamedStatusCounts_SingularAndPlural_AndEmail(t *testing.T) {
+	t.Run("singular counts and email text have zero numeric IDs", func(t *testing.T) {
+		ctx := context.Background()
+		statuses := map[int64]string{
+			1001: "kept_user",
+			8001: "(Deactivated)",
+			7001: "(Deactivated)",
+			7002: "(Suspended)",
+			7003: "(Unknown)",
+		}
+
+		client := &mockXClient{
+			getFollowerIDsFunc: func(ctx context.Context) ([]int64, error) {
+				return []int64{1001, 8001}, nil
+			},
+			getUsersBatchFunc: func(ctx context.Context, userIDs []int64) (map[int64]*xapi.User, error) {
+				res := make(map[int64]*xapi.User, len(userIDs))
+				for _, id := range userIDs {
+					if s, ok := statuses[id]; ok {
+						res[id] = &xapi.User{ID: id, Username: s}
+					}
+				}
+				return res, nil
+			},
+		}
+
+		mockDatabase := newMockDB()
+		mockDatabase.followerIDs = []int64{1001, 7001, 7002, 7003}
+
+		var emailedReport string
+		cfg := &config.Config{
+			Environment:  "development",
+			SMTPUser:     "user",
+			SMTPPassword: "pass",
+		}
+		var outBuf bytes.Buffer
+		agent := agents.NewInsightsAgent(client, mockDatabase, cfg, agents.InsightsOptions{Email: true}, &outBuf)
+		agent.SetEmailSender(func(ctx context.Context, cfg *config.Config, subject, reportText string) error {
+			emailedReport = reportText
+			return nil
+		})
+
+		if err := agent.Run(ctx); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		report := agent.Report()
+		expectedLines := []string{
+			" + 1 deleted account",
+			" - 1 deleted account",
+			" - 1 suspended account",
+			" - 1 unresolved account",
+		}
+		for _, exp := range expectedLines {
+			if !strings.Contains(report, exp) {
+				t.Errorf("expected %q in report, got:\n%s", exp, report)
+			}
+			if !strings.Contains(emailedReport, exp) {
+				t.Errorf("expected %q in emailed report, got:\n%s", exp, emailedReport)
+			}
+		}
+
+		if strings.Contains(report, "ID:") || strings.Contains(emailedReport, "ID:") {
+			t.Errorf("expected zero 'ID:' substrings in report and email, got:\n%s", report)
+		}
+		for _, idStr := range []string{"7001", "7002", "7003", "8001"} {
+			if strings.Contains(report, idStr) {
+				t.Errorf("report leaked numeric ID %s:\n%s", idStr, report)
+			}
+			if strings.Contains(emailedReport, idStr) {
+				t.Errorf("emailed report leaked numeric ID %s:\n%s", idStr, emailedReport)
+			}
+		}
+	})
+
+	t.Run("plural counts ordered after named handles", func(t *testing.T) {
+		ctx := context.Background()
+		statuses := map[int64]string{
+			1001: "kept_user",
+			9401: "active_leaver",
+			9101: "(Deactivated)",
+			9102: "(Deactivated)",
+			9103: "(Deactivated)",
+			9201: "(Suspended)",
+			9202: "(Suspended)",
+			9302: "(Unknown)",
+			// 9301 intentionally omitted -> empty liveRaw -> unresolved
+		}
+
+		client := &mockXClient{
+			getFollowerIDsFunc: func(ctx context.Context) ([]int64, error) {
+				return []int64{1001}, nil
+			},
+			getUsersBatchFunc: func(ctx context.Context, userIDs []int64) (map[int64]*xapi.User, error) {
+				res := make(map[int64]*xapi.User, len(userIDs))
+				for _, id := range userIDs {
+					if s, ok := statuses[id]; ok {
+						res[id] = &xapi.User{ID: id, Username: s}
+					}
+				}
+				return res, nil
+			},
+		}
+
+		mockDatabase := newMockDB()
+		mockDatabase.followerIDs = []int64{1001, 9101, 9102, 9103, 9201, 9202, 9301, 9302, 9401}
+
+		var outBuf bytes.Buffer
+		agent := agents.NewInsightsAgent(client, mockDatabase, &config.Config{Environment: "development"}, agents.InsightsOptions{}, &outBuf)
+		if err := agent.Run(ctx); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		report := agent.Report()
+		idxNamed := strings.Index(report, " - @active_leaver")
+		idxDeleted := strings.Index(report, " - 3 deleted accounts")
+		idxSuspended := strings.Index(report, " - 2 suspended accounts")
+		idxUnresolved := strings.Index(report, " - 2 unresolved accounts")
+
+		if idxNamed == -1 || idxDeleted == -1 || idxSuspended == -1 || idxUnresolved == -1 {
+			t.Fatalf("missing expected lines in plural report:\n%s", report)
+		}
+		if !(idxNamed < idxDeleted && idxDeleted < idxSuspended && idxSuspended < idxUnresolved) {
+			t.Errorf("expected named handle before deleted/suspended/unresolved summary lines, got:\n%s", report)
+		}
+		if strings.Contains(report, "ID:") {
+			t.Errorf("report must not contain 'ID:', got:\n%s", report)
+		}
+		for _, idStr := range []string{"9101", "9102", "9103", "9201", "9202", "9301", "9302", "9401"} {
+			if strings.Contains(report, idStr) {
+				t.Errorf("report leaked numeric ID %s:\n%s", idStr, report)
+			}
+		}
+	})
+}
+
+func TestInsightsAgent_CachedHandlesRecovery_AndBaselineBackfill(t *testing.T) {
+	ctx := context.Background()
+
+	// Build 150 followers on initial baseline run (previousFollowerIDs is empty)
+	baselineIDs := make([]int64, 150)
+	for i := 0; i < 150; i++ {
+		baselineIDs[i] = int64(5001 + i)
+	}
+
+	var mu sync.Mutex
+	var baselineResolvedCount int
+
+	mockDatabase := newMockDB()
+
+	// Run 1: Baseline run should progressively backfill up to 100 handles
+	clientRun1 := &mockXClient{
+		getFollowerIDsFunc: func(ctx context.Context) ([]int64, error) {
+			return baselineIDs, nil
+		},
+		getUsersBatchFunc: func(ctx context.Context, userIDs []int64) (map[int64]*xapi.User, error) {
+			mu.Lock()
+			baselineResolvedCount += len(userIDs)
+			mu.Unlock()
+
+			res := make(map[int64]*xapi.User, len(userIDs))
+			for _, id := range userIDs {
+				switch id {
+				case 5001:
+					res[id] = &xapi.User{ID: id, Username: "@old_friend"}
+				case 5002:
+					res[id] = &xapi.User{ID: id, Username: "bad_actor"}
+				case 5003:
+					res[id] = &xapi.User{ID: id, Username: "flaky_api"}
+				case 5004:
+					res[id] = &xapi.User{ID: id, Username: "(Deactivated)"}
+				default:
+					res[id] = &xapi.User{ID: id, Username: fmt.Sprintf("member_%d", id)}
+				}
+			}
+			return res, nil
+		},
+	}
+
+	var outBuf1 bytes.Buffer
+	agent1 := agents.NewInsightsAgent(clientRun1, mockDatabase, &config.Config{Environment: "development"}, agents.InsightsOptions{}, &outBuf1)
+	if err := agent1.Run(ctx); err != nil {
+		t.Fatalf("baseline run failed: %v", err)
+	}
+
+	if baselineResolvedCount != 100 {
+		t.Fatalf("expected baseline backfill to resolve max 100 follower IDs, got %d", baselineResolvedCount)
+	}
+
+	cachedAfterRun1, _ := mockDatabase.GetFollowerUsernames(ctx)
+	if cachedAfterRun1[5001] != "old_friend" || cachedAfterRun1[5002] != "bad_actor" || cachedAfterRun1[5003] != "flaky_api" {
+		t.Fatalf("expected active handles to be normalized and cached after baseline run, got: %v", cachedAfterRun1)
+	}
+	if _, exists := cachedAfterRun1[5004]; exists {
+		t.Errorf("expected '(Deactivated)' status placeholder not to be cached, got %q", cachedAfterRun1[5004])
+	}
+
+	// Run 2: 5001 deactivated, 5002 suspended, 5003 API unresolved ("") -> all 3 should use cached handles!
+	remainingIDs := baselineIDs[3:] // 5004..5150 remain
+	clientRun2 := &mockXClient{
+		getFollowerIDsFunc: func(ctx context.Context) ([]int64, error) {
+			return remainingIDs, nil
+		},
+		getUsersBatchFunc: func(ctx context.Context, userIDs []int64) (map[int64]*xapi.User, error) {
+			res := make(map[int64]*xapi.User, len(userIDs))
+			for _, id := range userIDs {
+				switch id {
+				case 5001:
+					res[id] = &xapi.User{ID: id, Username: "(Deactivated)"}
+				case 5002:
+					res[id] = &xapi.User{ID: id, Username: "(Suspended)"}
+				case 5003:
+					// Omitted -> empty live handle -> fallback to cached handle
+				default:
+					res[id] = &xapi.User{ID: id, Username: fmt.Sprintf("member_%d", id)}
+				}
+			}
+			return res, nil
+		},
+	}
+
+	var outBuf2 bytes.Buffer
+	agent2 := agents.NewInsightsAgent(clientRun2, mockDatabase, &config.Config{Environment: "development"}, agents.InsightsOptions{}, &outBuf2)
+	if err := agent2.Run(ctx); err != nil {
+		t.Fatalf("second run failed: %v", err)
+	}
+
+	report2 := agent2.Report()
+	for _, exp := range []string{
+		" - @bad_actor (suspended)",
+		" - @flaky_api",
+		" - @old_friend (deleted)",
+	} {
+		if !strings.Contains(report2, exp) {
+			t.Errorf("expected %q in report, got:\n%s", exp, report2)
+		}
+	}
+
+	if strings.Contains(report2, "ID:") {
+		t.Errorf("report must never contain 'ID:', got:\n%s", report2)
+	}
+	for _, idStr := range []string{"5001", "5002", "5003"} {
+		if strings.Contains(report2, idStr) {
+			t.Errorf("report leaked numeric ID %s:\n%s", idStr, report2)
+		}
+	}
+}
+
+func TestInsightsAgent_NilUserInBatch_DoesNotPanic(t *testing.T) {
+	ctx := context.Background()
+	client := &mockXClient{
+		getFollowerIDsFunc: func(ctx context.Context) ([]int64, error) {
+			return []int64{1001, 8888}, nil
+		},
+		getUsersBatchFunc: func(ctx context.Context, userIDs []int64) (map[int64]*xapi.User, error) {
+			return map[int64]*xapi.User{
+				1001: {ID: 1001, Username: "valid_user"},
+				8888: nil,
+			}, nil
+		},
+	}
+
+	mockDatabase := newMockDB()
+	mockDatabase.followerIDs = []int64{1001}
+
+	var outBuf bytes.Buffer
+	agent := agents.NewInsightsAgent(client, mockDatabase, &config.Config{Environment: "development"}, agents.InsightsOptions{}, &outBuf)
+	if err := agent.Run(ctx); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	report := agent.Report()
+	if !strings.Contains(report, " + 1 unresolved account") {
+		t.Errorf("expected nil batch user to be counted as ' + 1 unresolved account', got:\n%s", report)
+	}
+	if strings.Contains(report, "8888") {
+		t.Errorf("report leaked numeric ID 8888:\n%s", report)
 	}
 }
 

@@ -20,7 +20,9 @@ import (
 // InsightsDB defines SQLite operations required by InsightsAgent.
 type InsightsDB interface {
 	GetFollowerIDs(ctx context.Context) ([]int64, error)
+	GetFollowerUsernames(ctx context.Context) (map[int64]string, error)
 	ReplaceFollowers(ctx context.Context, followerIDs []int64) error
+	UpsertFollowerUsernames(ctx context.Context, usernames map[int64]string) error
 	GetLatestInsight(ctx context.Context) (*db.Insight, error)
 	GetInsightAtOffset(ctx context.Context, offsetDays int) (*db.Insight, error)
 	AddInsight(ctx context.Context, followers, following, tweetCount, listedCount int) error
@@ -83,6 +85,7 @@ type insightsReportData struct {
 	Comparisons    map[string]*db.Insight
 	NewUserMap     map[int64]string
 	LostUserMap    map[int64]string
+	CachedUserMap  map[int64]string
 	NewIDs         []int64
 	LostIDs        []int64
 }
@@ -114,6 +117,14 @@ func (a *InsightsAgent) Run(ctx context.Context) error {
 		return fmt.Errorf("query previous followers: %w", err)
 	}
 
+	cachedUsernames, err := a.db.GetFollowerUsernames(ctx)
+	if err != nil {
+		logging.Warnf("Warning: failed to load cached follower usernames: %v", err)
+		cachedUsernames = make(map[int64]string)
+	} else if cachedUsernames == nil {
+		cachedUsernames = make(map[int64]string)
+	}
+
 	currentSet := make(map[int64]bool, len(currentFollowerIDs))
 	for _, id := range currentFollowerIDs {
 		currentSet[id] = true
@@ -124,13 +135,16 @@ func (a *InsightsAgent) Run(ctx context.Context) error {
 	}
 
 	var newIDs, lostIDs []int64
+	newSet := make(map[int64]bool)
 	newUserMap := make(map[int64]string)
 	lostUserMap := make(map[int64]string)
+	backfillMap := make(map[int64]string)
 
 	if len(previousFollowerIDs) > 0 {
 		for id := range currentSet {
 			if !prevSet[id] {
 				newIDs = append(newIDs, id)
+				newSet[id] = true
 			}
 		}
 		for id := range prevSet {
@@ -138,10 +152,28 @@ func (a *InsightsAgent) Run(ctx context.Context) error {
 				lostIDs = append(lostIDs, id)
 			}
 		}
+	}
 
-		var wg sync.WaitGroup
-		var newErr, lostErr error
+	const maxBackfillPerRun = 100
+	var backfillIDs []int64
+	seenBackfill := make(map[int64]bool)
+	for _, id := range currentFollowerIDs {
+		if len(backfillIDs) >= maxBackfillPerRun {
+			break
+		}
+		if newSet[id] || seenBackfill[id] {
+			continue
+		}
+		if cachedUsernames[id] == "" {
+			seenBackfill[id] = true
+			backfillIDs = append(backfillIDs, id)
+		}
+	}
 
+	var wg sync.WaitGroup
+	var newErr, lostErr, backfillErr error
+
+	if len(previousFollowerIDs) > 0 {
 		if len(newIDs) > 0 {
 			wg.Add(1)
 			go func() {
@@ -156,18 +188,47 @@ func (a *InsightsAgent) Run(ctx context.Context) error {
 				lostUserMap, lostErr = a.resolveUserMap(ctx, lostIDs, "lost")
 			}()
 		}
-		wg.Wait()
+	}
+	if len(backfillIDs) > 0 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			backfillMap, backfillErr = a.resolveUserMap(ctx, backfillIDs, "existing")
+		}()
+	}
+	wg.Wait()
 
-		if newErr != nil {
-			logging.Warnf("Warning: error resolving new follower names: %v", newErr)
-		}
-		if lostErr != nil {
-			logging.Warnf("Warning: error resolving lost follower names: %v", lostErr)
-		}
+	if newErr != nil {
+		logging.Warnf("Warning: error resolving new follower names: %v", newErr)
+	}
+	if lostErr != nil {
+		logging.Warnf("Warning: error resolving lost follower names: %v", lostErr)
+	}
+	if backfillErr != nil {
+		logging.Warnf("Warning: error resolving existing follower names: %v", backfillErr)
 	}
 
 	if err := a.db.ReplaceFollowers(ctx, currentFollowerIDs); err != nil {
 		return fmt.Errorf("update followers table: %w", err)
+	}
+
+	toCache := make(map[int64]string)
+	for id, raw := range newUserMap {
+		h := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(raw), "@"))
+		if h != "" && !strings.HasPrefix(strings.TrimSpace(raw), "(") && !strings.HasPrefix(h, "(") {
+			toCache[id] = h
+		}
+	}
+	for id, raw := range backfillMap {
+		h := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(raw), "@"))
+		if h != "" && !strings.HasPrefix(strings.TrimSpace(raw), "(") && !strings.HasPrefix(h, "(") {
+			toCache[id] = h
+		}
+	}
+	if len(toCache) > 0 {
+		if err := a.db.UpsertFollowerUsernames(ctx, toCache); err != nil {
+			logging.Warnf("Warning: failed to cache follower usernames: %v", err)
+		}
 	}
 
 	comparisons := make(map[string]*db.Insight)
@@ -193,6 +254,7 @@ func (a *InsightsAgent) Run(ctx context.Context) error {
 		Comparisons:    comparisons,
 		NewUserMap:     newUserMap,
 		LostUserMap:    lostUserMap,
+		CachedUserMap:  cachedUsernames,
 		NewIDs:         newIDs,
 		LostIDs:        lostIDs,
 	}
@@ -227,7 +289,7 @@ func (a *InsightsAgent) resolveUserMap(ctx context.Context, ids []int64, label s
 	}
 	res := make(map[int64]string, len(ids))
 	for _, id := range ids {
-		if u, ok := batch[id]; ok && u.Username != "" {
+		if u, ok := batch[id]; ok && u != nil && u.Username != "" {
 			res[id] = u.Username
 		}
 	}
@@ -255,45 +317,17 @@ func (a *InsightsAgent) generateReport(d insightsReportData) string {
 	lines = append(lines, strings.Repeat("-", width))
 
 	// 2. Follower Changes
-	if len(d.NewIDs) > 0 || len(d.LostIDs) > 0 {
+	newIDs := dedupInt64Slice(d.NewIDs)
+	lostIDs := dedupInt64Slice(d.LostIDs)
+	if len(newIDs) > 0 || len(lostIDs) > 0 {
 		lines = append(lines, "           FOLLOWERS LOG")
-		if len(d.NewIDs) > 0 {
-			lines = append(lines, fmt.Sprintf("New (%d):", len(d.NewIDs)))
-			sortedNew := make([]int64, len(d.NewIDs))
-			copy(sortedNew, d.NewIDs)
-			sort.Slice(sortedNew, func(i, j int) bool { return sortedNew[i] < sortedNew[j] })
-
-			for _, uid := range sortedNew {
-				handle := d.NewUserMap[uid]
-				if handle != "" {
-					if strings.HasPrefix(handle, "(") {
-						lines = append(lines, fmt.Sprintf(" + ID: %d %s", uid, handle))
-					} else {
-						lines = append(lines, fmt.Sprintf(" + @%s", handle))
-					}
-				} else {
-					lines = append(lines, fmt.Sprintf(" + ID: %d", uid))
-				}
-			}
+		if len(newIDs) > 0 {
+			lines = append(lines, fmt.Sprintf("New (%d):", len(newIDs)))
+			lines = append(lines, formatFollowerSection("+", newIDs, d.NewUserMap, d.CachedUserMap)...)
 		}
-		if len(d.LostIDs) > 0 {
-			lines = append(lines, fmt.Sprintf("Lost (%d):", len(d.LostIDs)))
-			sortedLost := make([]int64, len(d.LostIDs))
-			copy(sortedLost, d.LostIDs)
-			sort.Slice(sortedLost, func(i, j int) bool { return sortedLost[i] < sortedLost[j] })
-
-			for _, uid := range sortedLost {
-				handle := d.LostUserMap[uid]
-				if handle != "" {
-					if strings.HasPrefix(handle, "(") {
-						lines = append(lines, fmt.Sprintf(" - ID: %d %s", uid, handle))
-					} else {
-						lines = append(lines, fmt.Sprintf(" - @%s", handle))
-					}
-				} else {
-					lines = append(lines, fmt.Sprintf(" - ID: %d", uid))
-				}
-			}
+		if len(lostIDs) > 0 {
+			lines = append(lines, fmt.Sprintf("Lost (%d):", len(lostIDs)))
+			lines = append(lines, formatFollowerSection("-", lostIDs, d.LostUserMap, d.CachedUserMap)...)
 		}
 		lines = append(lines, strings.Repeat("-", width))
 	}
@@ -376,6 +410,114 @@ func (a *InsightsAgent) generateReport(d insightsReportData) string {
 
 	lines = append(lines, strings.Repeat("=", width)+"\n")
 	return strings.Join(lines, "\n")
+}
+
+type namedFollowerLine struct {
+	sortKey string
+	line    string
+}
+
+func dedupInt64Slice(ids []int64) []int64 {
+	if len(ids) == 0 {
+		return nil
+	}
+	seen := make(map[int64]bool, len(ids))
+	out := make([]int64, 0, len(ids))
+	for _, id := range ids {
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, id)
+	}
+	return out
+}
+
+func formatFollowerSection(prefix string, ids []int64, liveMap, cachedMap map[int64]string) []string {
+	seen := make(map[int64]bool, len(ids))
+	var named []namedFollowerLine
+	var deletedCount, suspendedCount, unresolvedCount int
+
+	for _, uid := range ids {
+		if seen[uid] {
+			continue
+		}
+		seen[uid] = true
+
+		liveRaw := strings.TrimSpace(liveMap[uid])
+		liveClean := strings.TrimSpace(strings.TrimPrefix(liveRaw, "@"))
+		cachedClean := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(cachedMap[uid]), "@"))
+		if strings.HasPrefix(cachedClean, "(") {
+			cachedClean = ""
+		}
+
+		switch {
+		case liveClean != "" && !strings.HasPrefix(liveRaw, "(") && !strings.HasPrefix(liveClean, "("):
+			named = append(named, namedFollowerLine{
+				sortKey: strings.ToLower(liveClean),
+				line:    fmt.Sprintf(" %s @%s", prefix, liveClean),
+			})
+		case liveRaw == "(Deactivated)":
+			if cachedClean != "" {
+				named = append(named, namedFollowerLine{
+					sortKey: strings.ToLower(cachedClean),
+					line:    fmt.Sprintf(" %s @%s (deleted)", prefix, cachedClean),
+				})
+			} else {
+				deletedCount++
+			}
+		case liveRaw == "(Suspended)":
+			if cachedClean != "" {
+				named = append(named, namedFollowerLine{
+					sortKey: strings.ToLower(cachedClean),
+					line:    fmt.Sprintf(" %s @%s (suspended)", prefix, cachedClean),
+				})
+			} else {
+				suspendedCount++
+			}
+		default:
+			if cachedClean != "" {
+				named = append(named, namedFollowerLine{
+					sortKey: strings.ToLower(cachedClean),
+					line:    fmt.Sprintf(" %s @%s", prefix, cachedClean),
+				})
+			} else {
+				unresolvedCount++
+			}
+		}
+	}
+
+	sort.SliceStable(named, func(i, j int) bool {
+		if named[i].sortKey != named[j].sortKey {
+			return named[i].sortKey < named[j].sortKey
+		}
+		return named[i].line < named[j].line
+	})
+
+	out := make([]string, 0, len(named)+3)
+	for _, item := range named {
+		out = append(out, item.line)
+	}
+
+	if deletedCount == 1 {
+		out = append(out, fmt.Sprintf(" %s 1 deleted account", prefix))
+	} else if deletedCount > 1 {
+		out = append(out, fmt.Sprintf(" %s %d deleted accounts", prefix, deletedCount))
+	}
+
+	if suspendedCount == 1 {
+		out = append(out, fmt.Sprintf(" %s 1 suspended account", prefix))
+	} else if suspendedCount > 1 {
+		out = append(out, fmt.Sprintf(" %s %d suspended accounts", prefix, suspendedCount))
+	}
+
+	if unresolvedCount == 1 {
+		out = append(out, fmt.Sprintf(" %s 1 unresolved account", prefix))
+	} else if unresolvedCount > 1 {
+		out = append(out, fmt.Sprintf(" %s %d unresolved accounts", prefix, unresolvedCount))
+	}
+
+	return out
 }
 
 func formatCommas[T int | int64](n T) string {

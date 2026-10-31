@@ -40,6 +40,7 @@ type FollowingUser struct {
 // Follower holds a point-in-time snapshot of accounts following the user.
 type Follower struct {
 	UserID    int64     `json:"user_id"`
+	Username  string    `json:"username"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
@@ -372,9 +373,33 @@ func (m *DBManager) ClearPendingFollowingUsers(ctx context.Context) error {
 // Followers Operations
 // ----------------------------------------------------------------------------
 
-// ReplaceFollowers atomically wipes the followers table and stores the new snapshot.
+// ReplaceFollowers atomically wipes the followers table and stores the new snapshot,
+// preserving any previously cached usernames for surviving followers.
 func (m *DBManager) ReplaceFollowers(ctx context.Context, userIDs []int64) error {
 	return m.WithTx(ctx, func(tx *sql.Tx) error {
+		rows, err := tx.QueryContext(ctx, "SELECT user_id, username FROM followers WHERE username IS NOT NULL AND username != ''")
+		if err != nil {
+			return fmt.Errorf("query existing follower usernames: %w", err)
+		}
+
+		existing := make(map[int64]string)
+		for rows.Next() {
+			var uid int64
+			var uname string
+			if err := rows.Scan(&uid, &uname); err != nil {
+				_ = rows.Close()
+				return fmt.Errorf("scan existing follower username: %w", err)
+			}
+			existing[uid] = uname
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("iterate existing follower usernames: %w", err)
+		}
+		if err := rows.Close(); err != nil {
+			return fmt.Errorf("close existing follower usernames rows: %w", err)
+		}
+
 		if _, err := tx.ExecContext(ctx, "DELETE FROM followers"); err != nil {
 			return fmt.Errorf("delete old followers: %w", err)
 		}
@@ -383,15 +408,73 @@ func (m *DBManager) ReplaceFollowers(ctx context.Context, userIDs []int64) error
 			return nil
 		}
 
-		stmt, err := tx.PrepareContext(ctx, "INSERT INTO followers (user_id) VALUES (?)")
+		stmt, err := tx.PrepareContext(ctx, "INSERT OR REPLACE INTO followers (user_id, username) VALUES (?, ?)")
 		if err != nil {
 			return fmt.Errorf("prepare insert followers: %w", err)
 		}
 		defer stmt.Close()
 
 		for _, id := range userIDs {
-			if _, err := stmt.ExecContext(ctx, id); err != nil {
+			if _, err := stmt.ExecContext(ctx, id, existing[id]); err != nil {
 				return fmt.Errorf("insert follower %d: %w", id, err)
+			}
+		}
+		return nil
+	})
+}
+
+// GetFollowerUsernames retrieves cached non-empty usernames for current followers.
+func (m *DBManager) GetFollowerUsernames(ctx context.Context) (map[int64]string, error) {
+	query := `SELECT user_id, username FROM followers WHERE username IS NOT NULL AND username != ''`
+	rows, err := m.sqlDB.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("get follower usernames: %w", err)
+	}
+	defer rows.Close()
+
+	usernames := make(map[int64]string)
+	for rows.Next() {
+		var uid int64
+		var uname string
+		if err := rows.Scan(&uid, &uname); err != nil {
+			return nil, fmt.Errorf("scan follower username: %w", err)
+		}
+		usernames[uid] = uname
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate follower usernames: %w", err)
+	}
+	return usernames, nil
+}
+
+// UpsertFollowerUsernames caches normalized @handles for existing followers, ignoring status placeholders.
+func (m *DBManager) UpsertFollowerUsernames(ctx context.Context, usernames map[int64]string) error {
+	if len(usernames) == 0 {
+		return nil
+	}
+
+	cleaned := make(map[int64]string, len(usernames))
+	for uid, handle := range usernames {
+		clean := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(handle), "@"))
+		if clean == "" || strings.HasPrefix(clean, "(") {
+			continue
+		}
+		cleaned[uid] = clean
+	}
+	if len(cleaned) == 0 {
+		return nil
+	}
+
+	return m.WithTx(ctx, func(tx *sql.Tx) error {
+		stmt, err := tx.PrepareContext(ctx, "UPDATE followers SET username = ? WHERE user_id = ?")
+		if err != nil {
+			return fmt.Errorf("prepare upsert follower usernames: %w", err)
+		}
+		defer stmt.Close()
+
+		for uid, clean := range cleaned {
+			if _, err := stmt.ExecContext(ctx, clean, uid); err != nil {
+				return fmt.Errorf("update follower %d username: %w", uid, err)
 			}
 		}
 		return nil

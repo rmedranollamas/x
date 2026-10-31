@@ -52,7 +52,7 @@ type User struct {
 	ProfileImageURL string    `json:"profile_image_url"`
 	CreatedAt       time.Time `json:"created_at"`
 	PinnedTweetID   int64     `json:"pinned_tweet_id,omitempty"`
-	Status          string    `json:"status,omitempty"` // ACTIVE, SUSPENDED, DEACTIVATED, NOT_FOUND
+	Status          string    `json:"status,omitempty"` // ACTIVE, (Suspended), (Deactivated), (Unknown)
 }
 
 // Tweet represents a unified tweet status across v1.1 and v2 APIs.

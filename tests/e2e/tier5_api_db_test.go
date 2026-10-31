@@ -610,7 +610,7 @@ func TestTier5_DB_Migration_IdempotencyAndPartialUpgrades(t *testing.T) {
 	}
 	defer mgr.Close()
 
-	// First run: executes all 4 migrations
+	// First run: executes all 5 migrations
 	if err := mgr.RunMigrations(); err != nil {
 		t.Fatalf("first migration run failed: %v", err)
 	}
@@ -619,8 +619,8 @@ func TestTier5_DB_Migration_IdempotencyAndPartialUpgrades(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to get applied versions: %v", err)
 	}
-	if len(appliedFirst) != 4 {
-		t.Errorf("expected 4 applied migrations, got %d", len(appliedFirst))
+	if len(appliedFirst) != 5 {
+		t.Errorf("expected 5 applied migrations, got %d", len(appliedFirst))
 	}
 
 	// Count backups created so far
@@ -636,8 +636,8 @@ func TestTier5_DB_Migration_IdempotencyAndPartialUpgrades(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to get applied versions on second run: %v", err)
 	}
-	if len(appliedSecond) != 4 {
-		t.Errorf("expected still 4 applied migrations, got %d", len(appliedSecond))
+	if len(appliedSecond) != 5 {
+		t.Errorf("expected still 5 applied migrations, got %d", len(appliedSecond))
 	}
 
 	secondBackups, _ := os.ReadDir(backupDir)

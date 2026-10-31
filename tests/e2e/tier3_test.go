@@ -44,7 +44,7 @@ func TestTier3_Unblock_And_BlockedIDs_Sync(t *testing.T) {
 }
 
 // TestTier3_Insights_AutoMigrates_LegacyDB verifies that running insights
-// against a legacy v1 database automatically applies migrations m001 through m004.
+// against a legacy v1 database automatically applies migrations m001 through m005.
 func TestTier3_Insights_AutoMigrates_LegacyDB(t *testing.T) {
 	tc := NewTestContext(t)
 
@@ -57,10 +57,10 @@ func TestTier3_Insights_AutoMigrates_LegacyDB(t *testing.T) {
 		t.Fatalf("insights failed on legacy database: %d: %s", res.ExitCode, res.Stderr)
 	}
 
-	// Verify schema migrations advanced to latest version (4)
+	// Verify schema migrations advanced to latest version (5)
 	version, err := tc.QueryDB(tc.DBPath, "SELECT MAX(version) FROM schema_versions;")
-	if err != nil || version != "4" {
-		t.Logf("Notice: schema_versions max version is %q (err: %v)", version, err)
+	if err != nil || version != "5" {
+		t.Errorf("expected schema_versions max version 5, got %q (err: %v)", version, err)
 	}
 
 	// Verify column listed_count exists in insights table
@@ -74,6 +74,9 @@ func TestTier3_Insights_AutoMigrates_LegacyDB(t *testing.T) {
 	}
 	if !tc.ColumnExists(tc.DBPath, "deleted_tweets", "engagement_score") {
 		t.Errorf("expected engagement_score column in deleted_tweets by migration m004")
+	}
+	if !tc.ColumnExists(tc.DBPath, "followers", "username") {
+		t.Errorf("expected username column in followers by migration m005")
 	}
 }
 

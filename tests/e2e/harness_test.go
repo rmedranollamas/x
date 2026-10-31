@@ -111,8 +111,37 @@ func NewMockTwitterServer() *MockTwitterServer {
 			idsStr := r.URL.Query().Get("ids")
 			requestedIDs := strings.Split(idsStr, ",")
 			dataList := make([]map[string]interface{}, 0)
+			errorsList := make([]map[string]interface{}, 0)
 			for _, id := range requestedIDs {
 				id = strings.TrimSpace(id)
+				if id == "" {
+					continue
+				}
+				uid, parseErr := strconv.ParseInt(id, 10, 64)
+				if parseErr == nil {
+					if status, ok := ms.UnblockErrors[uid]; ok {
+						if status == http.StatusNotFound {
+							errorsList = append(errorsList, map[string]interface{}{
+								"resource_id": id,
+								"parameter":   "ids",
+								"value":       id,
+								"title":       "Not Found Error",
+								"detail":      fmt.Sprintf("Could not find user with ids: [%s].", id),
+							})
+							continue
+						}
+						if status == http.StatusForbidden {
+							errorsList = append(errorsList, map[string]interface{}{
+								"resource_id": id,
+								"parameter":   "ids",
+								"value":       id,
+								"title":       "Forbidden",
+								"detail":      fmt.Sprintf("User has been suspended: [%s].", id),
+							})
+							continue
+						}
+					}
+				}
 				if u, ok := ms.UsersBatch[id]; ok {
 					dataList = append(dataList, u)
 				} else {
@@ -124,6 +153,9 @@ func NewMockTwitterServer() *MockTwitterServer {
 				}
 			}
 			resp := map[string]interface{}{"data": dataList}
+			if len(errorsList) > 0 {
+				resp["errors"] = errorsList
+			}
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(resp)
 
@@ -216,6 +248,50 @@ func NewMockTwitterServer() *MockTwitterServer {
 				"name":        fmt.Sprintf("User %d", uid),
 				"screen_name": fmt.Sprintf("screen_%d", uid),
 			})
+
+		// v1.1 users/lookup.json
+		case r.Method == http.MethodGet && r.URL.Path == "/1.1/users/lookup.json":
+			idsStr := r.URL.Query().Get("user_id")
+			requestedIDs := strings.Split(idsStr, ",")
+			users := make([]map[string]interface{}, 0)
+			for _, id := range requestedIDs {
+				id = strings.TrimSpace(id)
+				if id == "" {
+					continue
+				}
+				uid, err := strconv.ParseInt(id, 10, 64)
+				if err != nil {
+					continue
+				}
+				if status, ok := ms.UnblockErrors[uid]; ok && status != http.StatusOK {
+					continue
+				}
+				screenName := fmt.Sprintf("handle_%d", uid)
+				name := fmt.Sprintf("User %d", uid)
+				if u, ok := ms.UsersBatch[id]; ok {
+					if sn, ok := u["username"].(string); ok && sn != "" {
+						screenName = sn
+					}
+					if nm, ok := u["name"].(string); ok && nm != "" {
+						name = nm
+					}
+				}
+				users = append(users, map[string]interface{}{
+					"id":          uid,
+					"id_str":      id,
+					"name":        name,
+					"screen_name": screenName,
+				})
+			}
+			w.Header().Set("Content-Type", "application/json")
+			if len(users) == 0 {
+				w.WriteHeader(http.StatusNotFound)
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"errors": []map[string]interface{}{{"code": 17, "message": "No user matches for specified terms."}},
+				})
+				return
+			}
+			json.NewEncoder(w).Encode(users)
 
 		default:
 			w.Header().Set("Content-Type", "application/json")
